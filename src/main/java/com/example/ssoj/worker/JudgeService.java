@@ -58,45 +58,51 @@ public class JudgeService {
 
         log.info("Submission {} changed from PENDING to JUDGING", submissionId);
 
-        LanguageExecutor executor = findExecutor(submission.getLanguage());
-        if (executor == null) {
-            log.warn("No LanguageExecutor found for language={}", submission.getLanguage());
-            return;
-        }
+        SubmissionStatus finalStatus = SubmissionStatus.SYSTEM_ERROR;
+        try {
+            LanguageExecutor executor = findExecutor(submission.getLanguage());
+            if (executor == null) {
+                log.warn("No LanguageExecutor found for language={}", submission.getLanguage());
+            } else {
+                List<TestCase> hiddenTestCases = testCaseRepository.findAllByProblem_IdAndHiddenTrueOrderByIdAsc(
+                        submission.getProblem().getId()
+                );
 
-        List<TestCase> hiddenTestCases = testCaseRepository.findAllByProblem_IdAndHiddenTrueOrderByIdAsc(
-                submission.getProblem().getId()
-        );
+                finalStatus = SubmissionStatus.AC;
+                for (TestCase testCase : hiddenTestCases) {
+                    JudgeContext context = new JudgeContext(
+                            submission.getId(),
+                            submission.getProblem().getId(),
+                            submission.getLanguage(),
+                            submission.getSourceCode(),
+                            testCase.getInput(),
+                            submission.getProblem().getTimeLimitMs(),
+                            submission.getProblem().getMemoryLimitMb()
+                    );
 
-        SubmissionStatus finalStatus = SubmissionStatus.AC;
-        for (TestCase testCase : hiddenTestCases) {
-            JudgeContext context = new JudgeContext(
-                    submission.getId(),
-                    submission.getProblem().getId(),
-                    submission.getLanguage(),
-                    submission.getSourceCode(),
-                    testCase.getInput(),
-                    submission.getProblem().getTimeLimitMs(),
-                    submission.getProblem().getMemoryLimitMb()
-            );
+                    JudgeExecutionResult executionResult = executor.execute(context);
+                    SubmissionStatus caseStatus = determineCaseStatus(submission.getLanguage(), executionResult, testCase);
 
-            JudgeExecutionResult executionResult = executor.execute(context);
-            SubmissionStatus caseStatus = determineCaseStatus(submission.getLanguage(), executionResult, testCase);
+                    submissionCaseResultRepository.save(new SubmissionCaseResult(
+                            submission,
+                            testCase,
+                            caseStatus,
+                            executionResult.executionTimeMs(),
+                            executionResult.memoryUsageKb()
+                    ));
 
-            submissionCaseResultRepository.save(new SubmissionCaseResult(
-                    submission,
-                    testCase,
-                    caseStatus,
-                    executionResult.executionTimeMs(),
-                    executionResult.memoryUsageKb()
-            ));
-
-            if (finalStatus == SubmissionStatus.AC && caseStatus != SubmissionStatus.AC) {
-                finalStatus = caseStatus;
+                    if (finalStatus == SubmissionStatus.AC && caseStatus != SubmissionStatus.AC) {
+                        finalStatus = caseStatus;
+                    }
+                }
             }
+        } catch (Exception exception) {
+            log.error("JudgeService failed while processing submission {}", submissionId, exception);
+            finalStatus = SubmissionStatus.SYSTEM_ERROR;
+        } finally {
+            submission.finish(finalStatus, Instant.now());
         }
 
-        submission.finish(finalStatus, Instant.now());
         log.info("Submission {} finished with status={}", submissionId, finalStatus);
     }
 
@@ -111,6 +117,10 @@ public class JudgeService {
     }
 
     private SubmissionStatus determineCaseStatus(String language, JudgeExecutionResult executionResult, TestCase testCase) {
+        if (executionResult.systemError()) {
+            return SubmissionStatus.SYSTEM_ERROR;
+        }
+
         if (!executionResult.success()) {
             if (executionResult.stderr() != null && executionResult.stderr().contains("timed out")) {
                 return SubmissionStatus.TLE;

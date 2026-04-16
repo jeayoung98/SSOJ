@@ -35,6 +35,7 @@ public class PythonExecutor implements LanguageExecutor {
     @Override
     public JudgeExecutionResult execute(JudgeContext context) {
         Path tempDirectory = null;
+        Process process = null;
         try {
             tempDirectory = Files.createTempDirectory("judge-python-");
             Files.writeString(tempDirectory.resolve(SOURCE_FILE_NAME), context.sourceCode(), StandardCharsets.UTF_8);
@@ -61,7 +62,7 @@ public class PythonExecutor implements LanguageExecutor {
             );
 
             Instant startedAt = Instant.now();
-            Process process = new ProcessBuilder(command).start();
+            process = new ProcessBuilder(command).start();
 
             try (OutputStream outputStream = process.getOutputStream()) {
                 outputStream.write(context.input().getBytes(StandardCharsets.UTF_8));
@@ -72,18 +73,24 @@ public class PythonExecutor implements LanguageExecutor {
 
             if (!finished) {
                 process.destroyForcibly();
-                return new JudgeExecutionResult(false, "", "Execution timed out", (int) executionTimeMs, null);
+                return new JudgeExecutionResult(false, "", "Execution timed out", (int) executionTimeMs, null, false);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             boolean success = process.exitValue() == 0;
 
-            return new JudgeExecutionResult(success, stdout, stderr, (int) executionTimeMs, null);
+            return new JudgeExecutionResult(success, stdout, stderr, (int) executionTimeMs, null, false);
+        } catch (IOException exception) {
+            log.warn("Python Docker execution failed for submission {}", context.submissionId(), exception);
+            return JudgeExecutionResult.systemError(exception.getMessage());
         } catch (Exception exception) {
             log.warn("Python execution failed for submission {}", context.submissionId(), exception);
-            return new JudgeExecutionResult(false, "", exception.getMessage(), null, null);
+            return JudgeExecutionResult.systemError(exception.getMessage());
         } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
             deleteDirectory(tempDirectory);
         }
     }
