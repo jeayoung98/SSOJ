@@ -8,15 +8,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class JudgeService {
 
     private static final Logger log = LoggerFactory.getLogger(JudgeService.class);
     private final SubmissionRepository submissionRepository;
+    private final List<LanguageExecutor> languageExecutors;
 
-    public JudgeService(SubmissionRepository submissionRepository) {
+    public JudgeService(SubmissionRepository submissionRepository, List<LanguageExecutor> languageExecutors) {
         this.submissionRepository = submissionRepository;
+        this.languageExecutors = languageExecutors;
     }
 
     @Transactional
@@ -39,5 +42,33 @@ public class JudgeService {
         }
 
         log.info("Submission {} changed from PENDING to JUDGING", submissionId);
+
+        LanguageExecutor executor = findExecutor(submission.getLanguage());
+        if (executor == null) {
+            log.warn("No LanguageExecutor found for language={}", submission.getLanguage());
+            return;
+        }
+
+        JudgeContext context = new JudgeContext(
+                submission.getId(),
+                submission.getProblem().getId(),
+                submission.getLanguage(),
+                submission.getSourceCode(),
+                "",
+                submission.getProblem().getTimeLimitMs(),
+                submission.getProblem().getMemoryLimitMb()
+        );
+
+        log.info("Prepared judge context for submission {} with executor {}", submissionId, executor.getClass().getSimpleName());
+    }
+
+    private LanguageExecutor findExecutor(String language) {
+        for (LanguageExecutor languageExecutor : languageExecutors) {
+            if (languageExecutor.supports(language)) {
+                return languageExecutor;
+            }
+        }
+
+        return null;
     }
 }
