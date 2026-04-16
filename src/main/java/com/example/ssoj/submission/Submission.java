@@ -81,6 +81,13 @@ public class Submission {
         return finishedAt;
     }
 
+    public boolean isCompleted() {
+        return switch (status) {
+            case AC, WA, CE, RE, TLE, MLE, SYSTEM_ERROR -> true;
+            default -> false;
+        };
+    }
+
     public boolean markAsJudging(Instant startedAt) {
         if (status != SubmissionStatus.PENDING) {
             return false;
