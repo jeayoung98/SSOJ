@@ -73,14 +73,14 @@ public class JavaExecutor implements LanguageExecutor {
 
             if (!finished) {
                 process.destroyForcibly();
-                return new JudgeExecutionResult(false, "", "Execution timed out", (int) executionTimeMs, null, false);
+                return new JudgeExecutionResult(false, "", "Execution timed out", null, (int) executionTimeMs, null, false);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             boolean success = process.exitValue() == 0;
 
-            return new JudgeExecutionResult(success, stdout, stderr, (int) executionTimeMs, null, false);
+            return new JudgeExecutionResult(success, stdout, stderr, process.exitValue(), (int) executionTimeMs, null, false);
         } catch (IOException exception) {
             log.warn("Java Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());

@@ -15,16 +15,21 @@ public class CppExecutor implements LanguageExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(CppExecutor.class);
     private static final String SOURCE_FILE_NAME = "main.cpp";
-    private static final String CONTAINER_COMMAND = "g++ main.cpp -O2 -std=c++17 -o main && ./main";
 
     private final String dockerImage;
+    private final String compileCommand;
+    private final String runCommand;
     private final DockerProcessExecutor dockerProcessExecutor;
 
     public CppExecutor(
             @Value("${worker.executor.cpp.image:gcc:13}") String dockerImage,
+            @Value("${worker.executor.cpp.compile-command:g++ main.cpp -O2 -std=c++17 -o main}") String compileCommand,
+            @Value("${worker.executor.cpp.run-command:./main}") String runCommand,
             DockerProcessExecutor dockerProcessExecutor
     ) {
         this.dockerImage = dockerImage;
+        this.compileCommand = compileCommand;
+        this.runCommand = runCommand;
         this.dockerProcessExecutor = dockerProcessExecutor;
     }
 
@@ -39,7 +44,14 @@ public class CppExecutor implements LanguageExecutor {
         try {
             tempDirectory = Files.createTempDirectory("judge-cpp-");
             Files.writeString(tempDirectory.resolve(SOURCE_FILE_NAME), context.sourceCode(), StandardCharsets.UTF_8);
-            return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, CONTAINER_COMMAND);
+            log.info(
+                    "Executing C++ submission {} with image={}, compileCommand={}, runCommand={}",
+                    context.submissionId(),
+                    dockerImage,
+                    compileCommand,
+                    runCommand
+            );
+            return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, buildContainerCommand());
         } catch (IOException exception) {
             log.warn("C++ Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());
@@ -53,6 +65,10 @@ public class CppExecutor implements LanguageExecutor {
         } finally {
             deleteDirectory(tempDirectory);
         }
+    }
+
+    private String buildContainerCommand() {
+        return compileCommand + " && " + runCommand;
     }
 
     private void deleteDirectory(Path directory) {

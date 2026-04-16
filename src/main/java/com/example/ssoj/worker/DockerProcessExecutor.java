@@ -1,5 +1,7 @@
 package com.example.ssoj.worker;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,6 +15,8 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 public class DockerProcessExecutor {
+
+    private static final Logger log = LoggerFactory.getLogger(DockerProcessExecutor.class);
 
     public JudgeExecutionResult execute(JudgeContext context, Path workspaceDirectory, String dockerImage, String containerCommand)
             throws IOException, InterruptedException {
@@ -39,6 +43,12 @@ public class DockerProcessExecutor {
 
         Process process = null;
         try {
+            log.info(
+                    "Starting Docker execution for submission {} with image={} command={}",
+                    context.submissionId(),
+                    dockerImage,
+                    containerCommand
+            );
             Instant startedAt = Instant.now();
             process = new ProcessBuilder(command).start();
 
@@ -58,7 +68,22 @@ public class DockerProcessExecutor {
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             int exitCode = process.exitValue();
 
+            log.info(
+                    "Docker execution finished for submission {} with image={} exitCode={}",
+                    context.submissionId(),
+                    dockerImage,
+                    exitCode
+            );
             return new JudgeExecutionResult(exitCode == 0, stdout, stderr, exitCode, (int) executionTimeMs, null, false);
+        } catch (IOException exception) {
+            log.warn(
+                    "Failed to start Docker for submission {} with image={} command={}",
+                    context.submissionId(),
+                    dockerImage,
+                    containerCommand,
+                    exception
+            );
+            throw exception;
         } finally {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
