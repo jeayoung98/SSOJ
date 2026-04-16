@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class DockerProcessExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(DockerProcessExecutor.class);
+    private static final String CPU_LIMIT = "1";
 
     public JudgeExecutionResult execute(JudgeContext context, Path workspaceDirectory, String dockerImage, String containerCommand)
             throws IOException, InterruptedException {
@@ -30,7 +31,7 @@ public class DockerProcessExecutor {
                 "-m",
                 context.memoryLimitMb() + "m",
                 "--cpus",
-                "1",
+                CPU_LIMIT,
                 "-v",
                 workspaceDirectory.toAbsolutePath() + ":/workspace",
                 "-w",
@@ -61,7 +62,13 @@ public class DockerProcessExecutor {
 
             if (!finished) {
                 process.destroyForcibly();
-                return new JudgeExecutionResult(false, "", "Execution timed out", null, (int) executionTimeMs, null, false);
+                log.info(
+                        "Docker execution timed out for submission {} after {} ms with image={}",
+                        context.submissionId(),
+                        executionTimeMs,
+                        dockerImage
+                );
+                return JudgeExecutionResult.timeout((int) executionTimeMs);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -69,12 +76,14 @@ public class DockerProcessExecutor {
             int exitCode = process.exitValue();
 
             log.info(
-                    "Docker execution finished for submission {} with image={} exitCode={}",
+                    "Docker execution finished for submission {} with image={} exitCode={} memoryLimit={}m cpuLimit={}",
                     context.submissionId(),
                     dockerImage,
-                    exitCode
+                    exitCode,
+                    context.memoryLimitMb(),
+                    CPU_LIMIT
             );
-            return new JudgeExecutionResult(exitCode == 0, stdout, stderr, exitCode, (int) executionTimeMs, null, false);
+            return new JudgeExecutionResult(exitCode == 0, stdout, stderr, exitCode, (int) executionTimeMs, null, false, false);
         } catch (IOException exception) {
             log.warn(
                     "Failed to start Docker for submission {} with image={} command={}",

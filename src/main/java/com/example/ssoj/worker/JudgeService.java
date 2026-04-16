@@ -121,11 +121,11 @@ public class JudgeService {
             return SubmissionStatus.SYSTEM_ERROR;
         }
 
-        if (!executionResult.success()) {
-            if (executionResult.stderr() != null && executionResult.stderr().contains("timed out")) {
-                return SubmissionStatus.TLE;
-            }
+        if (executionResult.timedOut()) {
+            return SubmissionStatus.TLE;
+        }
 
+        if (!executionResult.success()) {
             if ("java".equalsIgnoreCase(language) && executionResult.stderr() != null && executionResult.stderr().contains("error:")) {
                 return SubmissionStatus.CE;
             }

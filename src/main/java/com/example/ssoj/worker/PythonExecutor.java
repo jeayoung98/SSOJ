@@ -73,14 +73,14 @@ public class PythonExecutor implements LanguageExecutor {
 
             if (!finished) {
                 process.destroyForcibly();
-                return new JudgeExecutionResult(false, "", "Execution timed out", null, (int) executionTimeMs, null, false);
+                return JudgeExecutionResult.timeout((int) executionTimeMs);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             boolean success = process.exitValue() == 0;
 
-            return new JudgeExecutionResult(success, stdout, stderr, process.exitValue(), (int) executionTimeMs, null, false);
+            return new JudgeExecutionResult(success, stdout, stderr, process.exitValue(), (int) executionTimeMs, null, false, false);
         } catch (IOException exception) {
             log.warn("Python Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());
