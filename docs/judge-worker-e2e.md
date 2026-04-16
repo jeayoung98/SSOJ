@@ -1,124 +1,129 @@
-# Judge Worker End-to-End Scenarios
+﻿# Judge Worker End-to-End 시나리오
 
-## Scope
+## 범위
 
-This document is based on the current implementation only.
+이 문서는 현재 구현 기준으로 작성되었습니다.
 
-- E2E executable now:
+- 지금 바로 E2E 실행 가능한 언어:
   - Java
   - Python
-- Sample code only for now:
+- 현재는 샘플 코드만 제공하는 언어:
   - C++
-  - Reason: `CppExecutor` is not implemented in the current worker
+  - 이유: 현재 worker에는 `CppExecutor`가 구현되어 있지 않습니다.
 
-## Assumed problem
+## 가정하는 문제
 
-- Problem type: A+B
-- Input:
-  - one line with two integers
-- Expected output:
-  - sum of the two integers
+- 문제 유형: A+B
+- 입력:
+  - 한 줄에 정수 두 개
+- 기대 출력:
+  - 두 수의 합
 
-Example:
+예시:
 
-- Input: `1 2`
-- Output: `3`
+- 입력: `1 2`
+- 출력: `3`
 
-## Expected judge flow
+## 기대 채점 흐름
 
-1. Insert a `submission` row with status `PENDING`
-2. Insert hidden `test_case` rows for the target `problem`
-3. Push `submissionId` to Redis queue `judge:queue`
-4. Worker consumes the id
-5. Worker changes `submission.status` to `JUDGING`
-6. Worker runs the selected executor in Docker for each hidden test case
-7. Worker stores one `submission_case_result` row per hidden test case
-8. Worker sets final `submission.status`
-9. Worker sets `submission.finished_at`
+1. `submission` row를 `PENDING` 상태로 저장
+2. 대상 `problem`에 hidden `test_case` row 저장
+3. Redis 큐 `judge:queue`에 `submissionId` push
+4. worker가 해당 id를 consume
+5. worker가 `submission.status`를 `JUDGING`로 변경
+6. worker가 hidden test case마다 Docker 내부에서 executor 실행
+7. worker가 hidden test case마다 `submission_case_result` row 저장
+8. worker가 최종 `submission.status` 저장
+9. worker가 `submission.finished_at` 저장
 
-## Recommended hidden test cases
+## 추천 hidden test case
 
-- Test case 1
+- 테스트케이스 1
   - input: `1 2`
   - output: `3`
-- Test case 2
+- 테스트케이스 2
   - input: `10 20`
   - output: `30`
-- Test case 3
+- 테스트케이스 3
   - input: `100 -5`
   - output: `95`
 
-## Status scenarios
+## 상태별 시나리오
 
 ### Java
 
 - `samples/submissions/java/ac/Main.java`
-  - expected final status: `AC`
+  - 기대 최종 상태: `AC`
 - `samples/submissions/java/wa/Main.java`
-  - expected final status: `WA`
+  - 기대 최종 상태: `WA`
 - `samples/submissions/java/ce/Main.java`
-  - expected final status: `CE`
+  - 기대 최종 상태: `CE`
 - `samples/submissions/java/re/Main.java`
-  - expected final status: `RE`
+  - 기대 최종 상태: `RE`
 - `samples/submissions/java/tle/Main.java`
-  - expected final status: `TLE`
+  - 기대 최종 상태: `TLE`
 
 ### Python
 
 - `samples/submissions/python/ac/main.py`
-  - expected final status: `AC`
+  - 기대 최종 상태: `AC`
 - `samples/submissions/python/wa/main.py`
-  - expected final status: `WA`
+  - 기대 최종 상태: `WA`
 - `samples/submissions/python/re/main.py`
-  - expected final status: `RE`
+  - 기대 최종 상태: `RE`
 - `samples/submissions/python/tle/main.py`
-  - expected final status: `TLE`
+  - 기대 최종 상태: `TLE`
 
-Note:
-- Current Python executor does not have a compile phase.
-- For Python, syntax/runtime failures are handled through execution failure.
-- In the current implementation, a Python syntax error is effectively observed as `RE`.
+메모:
+
+- 현재 Python executor에는 compile 단계가 없습니다.
+- Python은 문법 오류와 런타임 오류 모두 실행 실패로 처리됩니다.
+- 현재 구현에서는 Python 문법 오류도 실질적으로 `RE`로 보이게 됩니다.
 
 ### C++
 
 - `samples/submissions/cpp/ac/main.cpp`
-  - intended status after `CppExecutor` is added: `AC`
+  - `CppExecutor` 추가 후 기대 상태: `AC`
 - `samples/submissions/cpp/wa/main.cpp`
-  - intended status after `CppExecutor` is added: `WA`
+  - `CppExecutor` 추가 후 기대 상태: `WA`
 - `samples/submissions/cpp/ce/main.cpp`
-  - intended status after `CppExecutor` is added: `CE`
+  - `CppExecutor` 추가 후 기대 상태: `CE`
 - `samples/submissions/cpp/re/main.cpp`
-  - intended status after `CppExecutor` is added: `RE`
+  - `CppExecutor` 추가 후 기대 상태: `RE`
 - `samples/submissions/cpp/tle/main.cpp`
-  - intended status after `CppExecutor` is added: `TLE`
+  - `CppExecutor` 추가 후 기대 상태: `TLE`
 
-Note:
-- C++ sample codes are included for future verification.
-- Current worker cannot execute them end-to-end because `CppExecutor` is not implemented.
+메모:
 
-## Manual verification steps
+- C++ 샘플 코드는 이후 검증을 위해 포함했습니다.
+- 현재 worker는 `CppExecutor`가 없어서 C++를 end-to-end로 실행할 수 없습니다.
 
-### 1. Prepare infrastructure
+## 수동 검증 순서
 
-- Start PostgreSQL
-- Start Redis
-- Start Docker
-- Start the worker
+### 1. 인프라 준비
 
-Reference:
+- PostgreSQL 실행
+- Redis 실행
+- Docker 실행
+- worker 실행
+
+참고:
+
 - [judge-worker.md](/C:/Users/SSAFY/IdeaProjects/SSOJ/docs/judge-worker.md:1)
 
-### 2. Prepare database data
+### 2. DB 데이터 준비
 
-Insert one problem and hidden test cases.
+문제 1개와 hidden test case를 넣습니다.
 
-Required tables used by current worker:
+현재 worker가 사용하는 테이블:
+
 - `problem`
 - `submission`
 - `test_case`
 - `submission_case_result`
 
-Minimum data shape:
+최소 데이터 형태:
+
 - `problem`
   - `id`
   - `title`
@@ -131,61 +136,61 @@ Minimum data shape:
   - `output`
   - `is_hidden=true`
 
-### 3. Insert a submission
+### 3. submission 생성
 
-- Create a `submission` row
-- Set:
-  - `problem_id` to the prepared problem
-  - `language` to `java` or `python`
-  - `source_code` to one of the sample files
-  - `status` to `PENDING`
+- `submission` row를 하나 생성합니다.
+- 아래 값을 설정합니다.
+  - `problem_id`: 준비한 problem id
+  - `language`: `java` 또는 `python`
+  - `source_code`: 샘플 파일 내용
+  - `status`: `PENDING`
 
-### 4. Enqueue the submission
+### 4. submission enqueue
 
 ```powershell
 redis-cli LPUSH judge:queue <submissionId>
 ```
 
-### 5. Check worker logs
+### 5. worker 로그 확인
 
-Expected log sequence:
+기대 로그 순서:
 
-- queue consume log
+- queue consume 로그
 - `PENDING -> JUDGING`
-- final status log
+- 최종 상태 로그
 
-### 6. Check database results
+### 6. DB 결과 확인
 
-Verify `submission`:
+`submission` 확인:
 
-- `status` changes from `PENDING` to one of:
+- `status`가 `PENDING`에서 아래 중 하나로 바뀌어야 합니다.
   - `AC`
   - `WA`
   - `CE`
   - `RE`
   - `TLE`
-- `started_at` is filled
-- `finished_at` is filled
+- `started_at`이 채워져야 합니다.
+- `finished_at`이 채워져야 합니다.
 
-Verify `submission_case_result`:
+`submission_case_result` 확인:
 
-- one row per hidden test case
-- `status` matches the executor result and output comparison
+- hidden test case 개수만큼 row가 생겨야 합니다.
+- `status`는 executor 결과와 출력 비교 결과에 맞아야 합니다.
 
-## What to verify per sample
+## 샘플별 확인 포인트
 
-- AC sample
-  - all `submission_case_result.status` values should be `AC`
-  - final `submission.status` should be `AC`
-- WA sample
-  - first wrong output should produce `WA`
-  - final `submission.status` should be `WA`
-- CE sample
-  - Java only in current E2E range
-  - final `submission.status` should be `CE`
-- RE sample
-  - process exits with failure
-  - final `submission.status` should be `RE`
-- TLE sample
-  - process exceeds `time_limit_ms`
-  - final `submission.status` should be `TLE`
+- AC 샘플
+  - 모든 `submission_case_result.status`가 `AC`
+  - 최종 `submission.status`가 `AC`
+- WA 샘플
+  - 첫 오답 출력에서 `WA`
+  - 최종 `submission.status`가 `WA`
+- CE 샘플
+  - 현재 E2E 가능 범위에서는 Java만 해당
+  - 최종 `submission.status`가 `CE`
+- RE 샘플
+  - 프로세스가 실패 종료
+  - 최종 `submission.status`가 `RE`
+- TLE 샘플
+  - 프로세스가 `time_limit_ms`를 초과
+  - 최종 `submission.status`가 `TLE`

@@ -1,126 +1,126 @@
-# Judge Worker Cleanup Check
+﻿# Judge Worker cleanup 검증
 
-## Scope
+## 범위
 
-This document is based on the current implementation only.
+이 문서는 현재 구현 기준으로 작성되었습니다.
 
-Current cleanup-related behavior in this worker:
+현재 worker의 cleanup 관련 동작:
 
-- executors create a temp directory under the local OS temp area
-- executors run Docker with `--rm`
-- executors delete temp directories in `finally`
-- executors destroy the process in `finally` if still alive
-- `JudgeService` finalizes submission state in `finally`
+- executor는 로컬 OS temp 경로 아래에 임시 디렉터리를 만듭니다.
+- executor는 Docker를 `--rm`으로 실행합니다.
+- executor는 `finally`에서 임시 디렉터리를 삭제합니다.
+- executor는 `finally`에서 프로세스가 살아 있으면 강제 종료합니다.
+- `JudgeService`는 `finally`에서 submission 최종 상태를 정리합니다.
 
-Current executable languages:
+현재 실제 실행 가능한 언어:
 
 - `java`
 - `python`
 
-## Goal
+## 목표
 
-Verify that:
+아래 항목을 확인합니다.
 
-- temp directories are removed after judging
-- Docker containers do not remain after judging
-- cleanup still runs on success, compile/runtime failure, timeout, and unexpected exception paths
+- 채점 후 임시 디렉터리가 삭제되는가
+- 채점 후 Docker 컨테이너가 남지 않는가
+- 성공, compile/runtime 실패, timeout, 예외 경로에서도 cleanup이 수행되는가
 
-## 1. Success case checks
+## 1. 성공 케이스에서 확인할 항목
 
-Use:
+사용 샘플:
 
-- Java AC sample
+- Java AC 샘플
   - `samples/submissions/java/ac/Main.java`
-- Python AC sample
+- Python AC 샘플
   - `samples/submissions/python/ac/main.py`
 
-Checklist:
+체크리스트:
 
-- [ ] Submission starts judging normally
-- [ ] Final `submission.status` becomes `AC`
-- [ ] `started_at` is filled
-- [ ] `finished_at` is filled
-- [ ] `submission_case_result` rows are stored
-- [ ] Temp directory created for the executor is removed after judging
-- [ ] No Docker container remains after execution
+- [ ] Submission이 정상적으로 채점 시작
+- [ ] 최종 `submission.status`가 `AC`
+- [ ] `started_at`이 채워짐
+- [ ] `finished_at`이 채워짐
+- [ ] `submission_case_result` row가 저장됨
+- [ ] executor가 만든 temp directory가 채점 후 삭제됨
+- [ ] 실행 후 Docker 컨테이너가 남지 않음
 
-## 2. Failure case checks
+## 2. CE / RE / TLE 발생 시 확인할 항목
 
-### CE case
+### CE 케이스
 
-Current practical scope:
+현재 실질적으로 확인 가능한 범위:
 
 - Java CE
   - `samples/submissions/java/ce/Main.java`
 
-Checklist:
+체크리스트:
 
-- [ ] Final `submission.status` becomes `CE`
-- [ ] Temp directory is removed
-- [ ] Docker container does not remain
-- [ ] Worker continues processing later submissions
+- [ ] 최종 `submission.status`가 `CE`
+- [ ] temp directory 삭제됨
+- [ ] Docker 컨테이너가 남지 않음
+- [ ] 이후 submission도 계속 처리 가능함
 
-### RE case
+### RE 케이스
 
-Use:
+사용 샘플:
 
 - Java RE
   - `samples/submissions/java/re/Main.java`
 - Python RE
   - `samples/submissions/python/re/main.py`
 
-Checklist:
+체크리스트:
 
-- [ ] Final `submission.status` becomes `RE`
-- [ ] Temp directory is removed
-- [ ] Docker container does not remain
-- [ ] `finished_at` is filled
+- [ ] 최종 `submission.status`가 `RE`
+- [ ] temp directory 삭제됨
+- [ ] Docker 컨테이너가 남지 않음
+- [ ] `finished_at`이 채워짐
 
-### TLE case
+### TLE 케이스
 
-Use:
+사용 샘플:
 
 - Java TLE
   - `samples/submissions/java/tle/Main.java`
 - Python TLE
   - `samples/submissions/python/tle/main.py`
 
-Checklist:
+체크리스트:
 
-- [ ] Final `submission.status` becomes `TLE`
-- [ ] Timed-out process is terminated
-- [ ] Temp directory is removed
-- [ ] Docker container does not remain
-- [ ] `finished_at` is filled
+- [ ] 최종 `submission.status`가 `TLE`
+- [ ] timeout 된 프로세스가 종료됨
+- [ ] temp directory 삭제됨
+- [ ] Docker 컨테이너가 남지 않음
+- [ ] `finished_at`이 채워짐
 
-## 3. How to check temp directories
+## 3. 임시 디렉터리 확인 방법
 
-### Current temp directory prefixes
+### 현재 temp directory prefix
 
 - Java executor:
   - `judge-java-`
 - Python executor:
   - `judge-python-`
 
-### Windows PowerShell check
+### Windows PowerShell 확인
 
-Before test:
-
-```powershell
-Get-ChildItem $env:TEMP -Directory | Where-Object { $_.Name -like 'judge-java-*' -or $_.Name -like 'judge-python-*' }
-```
-
-Run a submission, wait until it finishes, then check again:
+테스트 전:
 
 ```powershell
 Get-ChildItem $env:TEMP -Directory | Where-Object { $_.Name -like 'judge-java-*' -or $_.Name -like 'judge-python-*' }
 ```
 
-Expected result:
+submission 실행 후 종료를 기다린 다음 다시 확인:
 
-- [ ] No leftover temp directories for finished runs
+```powershell
+Get-ChildItem $env:TEMP -Directory | Where-Object { $_.Name -like 'judge-java-*' -or $_.Name -like 'judge-python-*' }
+```
 
-### Optional repeated watch
+기대 결과:
+
+- [ ] 종료된 실행의 temp directory가 남아 있지 않음
+
+### 반복 관찰용 예시
 
 ```powershell
 1..10 | ForEach-Object {
@@ -129,36 +129,34 @@ Expected result:
 }
 ```
 
-## 4. How to check Docker container leftovers
+## 4. Docker 컨테이너 잔존 여부 확인 방법
 
-The current executors use `docker run --rm`, so finished containers should not remain.
+현재 executor는 `docker run --rm`을 쓰므로, 실행이 끝난 컨테이너는 남지 않아야 합니다.
 
-### Check running containers
+### 실행 중 컨테이너 확인
 
 ```powershell
 docker ps
 ```
 
-### Check all containers including exited ones
+### 종료된 것 포함 전체 컨테이너 확인
 
 ```powershell
 docker ps -a
 ```
 
-### Recommended observation method
+### 추천 관찰 방식
 
-1. Check container list before test
-2. Trigger one submission
-3. During execution, a container may appear briefly
-4. After execution finishes, check again
+1. 테스트 전 컨테이너 목록 확인
+2. submission 하나 실행
+3. 실행 중 잠깐 컨테이너가 보일 수 있음
+4. 실행이 끝난 뒤 다시 확인
 
-Expected result:
+기대 결과:
 
-- [ ] No leftover container from the judge run remains after completion
+- [ ] judge run에서 생성된 컨테이너가 종료 후 남아 있지 않음
 
-### Useful filtered check
-
-If you want a quick repeated view:
+### 간단한 반복 확인
 
 ```powershell
 1..10 | ForEach-Object {
@@ -167,79 +165,80 @@ If you want a quick repeated view:
 }
 ```
 
-## 5. Exception-path cleanup verification
+## 5. 예외 발생 시에도 cleanup가 수행되는지 검증
 
-Current implementation catches executor failures and marks them as `SYSTEM_ERROR`.
-`JudgeService` also uses `finally` to avoid leaving submission state in `JUDGING`.
+현재 구현은 executor 실패를 `SYSTEM_ERROR`로 처리합니다.
+또한 `JudgeService`는 `finally`로 `JUDGING` 상태 방치를 막습니다.
 
-### Practical ways to trigger exception-like paths
+### 예외에 가까운 경로를 만드는 쉬운 방법
 
-#### Docker launch failure
+#### Docker 실행 실패
 
-Possible ways:
+방법 예시:
 
-- stop Docker Desktop
-- set a wrong image name in `application.properties`
+- Docker Desktop 중지
+- `application.properties`에 잘못된 이미지명 설정
 
-Examples:
+예시:
 
-- set `worker.executor.java.image=not-found-image`
-- or stop Docker completely
+- `worker.executor.java.image=not-found-image`
+- 또는 Docker 자체를 종료
 
-Expected result:
+기대 결과:
 
-- [ ] Final `submission.status` becomes `SYSTEM_ERROR`
-- [ ] `finished_at` is filled
-- [ ] No temp directory remains
-- [ ] No Docker container remains
+- [ ] 최종 `submission.status`가 `SYSTEM_ERROR`
+- [ ] `finished_at`이 채워짐
+- [ ] temp directory가 남지 않음
+- [ ] Docker 컨테이너가 남지 않음
 
-#### Missing executor
+#### executor 없음
 
-Possible way:
+방법 예시:
 
-- set `language=cpp` in `submission`
+- `submission.language=cpp`로 저장
 
-Expected result with current implementation:
+기대 결과:
 
-- [ ] Final `submission.status` becomes `SYSTEM_ERROR`
-- [ ] `finished_at` is filled
+- [ ] 최종 `submission.status`가 `SYSTEM_ERROR`
+- [ ] `finished_at`이 채워짐
 
-Note:
-- This is not a Docker exception path, but it is still useful to confirm submission finalization logic.
+메모:
 
-## 6. Cleanup failure suspicion points
+- 이건 Docker 예외 경로는 아니지만, submission 마무리 로직 검증에는 유용합니다.
 
-If temp directories remain:
+## 6. cleanup 실패 시 의심 포인트
 
-- [ ] `finally` block did not run because the process was killed externally
-- [ ] Worker process terminated unexpectedly during judging
-- [ ] Files inside temp directory were still locked by the OS
-- [ ] Antivirus or another process interfered with file deletion
-- [ ] Temp path permissions are unusual
+임시 디렉터리가 남아 있으면:
 
-If Docker containers remain:
+- [ ] `finally`가 돌기 전에 프로세스가 외부에서 강제 종료됨
+- [ ] worker 프로세스가 채점 중 비정상 종료됨
+- [ ] temp directory 내부 파일이 OS에 의해 lock 되어 있음
+- [ ] 백신 또는 다른 프로세스가 파일 삭제를 방해함
+- [ ] temp path 권한이 비정상적임
 
-- [ ] Container was not started with `--rm`
-- [ ] Docker daemon was interrupted during execution
-- [ ] Worker process was terminated before Docker cleanup completed
-- [ ] Manual local Docker activity is being confused with judge worker containers
+Docker 컨테이너가 남아 있으면:
 
-If submission stays in `JUDGING`:
+- [ ] 컨테이너가 `--rm` 없이 실행되었음
+- [ ] Docker daemon이 실행 중간에 끊김
+- [ ] Docker cleanup 전에 worker 프로세스가 종료됨
+- [ ] 로컬에서 수동 실행한 다른 Docker 컨테이너와 혼동하고 있음
 
-- [ ] Worker process crashed before transaction commit
-- [ ] Database connection issue prevented final update
-- [ ] Exception occurred outside the expected service flow
-- [ ] Multiple worker versions are running and interfering
+Submission이 `JUDGING`에 머물면:
 
-## 7. Recommended manual verification order
+- [ ] worker 프로세스가 transaction commit 전에 죽었음
+- [ ] DB 연결 문제로 최종 업데이트가 실패했음
+- [ ] 예상한 service 흐름 밖에서 예외가 발생했음
+- [ ] 여러 worker 버전이 동시에 떠서 간섭 중임
 
-1. Check existing temp directories
-2. Check existing Docker containers
-3. Run one AC submission
-4. Confirm final DB status and cleanup
-5. Run one CE or RE submission
-6. Confirm final DB status and cleanup
-7. Run one TLE submission
-8. Confirm final DB status and cleanup
-9. Stop Docker or misconfigure image to simulate executor failure
-10. Confirm `SYSTEM_ERROR`, `finished_at`, and cleanup behavior
+## 7. 추천 수동 검증 순서
+
+1. 기존 temp directory 확인
+2. 기존 Docker 컨테이너 확인
+3. AC submission 실행
+4. 최종 DB 상태와 cleanup 확인
+5. CE 또는 RE submission 실행
+6. 최종 DB 상태와 cleanup 확인
+7. TLE submission 실행
+8. 최종 DB 상태와 cleanup 확인
+9. Docker 종료 또는 잘못된 이미지 설정으로 executor 실패 유도
+10. `SYSTEM_ERROR`, `finished_at`, cleanup 동작 확인
