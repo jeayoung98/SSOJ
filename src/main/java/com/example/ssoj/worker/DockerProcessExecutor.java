@@ -1,0 +1,68 @@
+package com.example.ssoj.worker;
+
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+@Component
+public class DockerProcessExecutor {
+
+    public JudgeExecutionResult execute(JudgeContext context, Path workspaceDirectory, String dockerImage, String containerCommand)
+            throws IOException, InterruptedException {
+        List<String> command = List.of(
+                "docker",
+                "run",
+                "--rm",
+                "-i",
+                "--network",
+                "none",
+                "-m",
+                context.memoryLimitMb() + "m",
+                "--cpus",
+                "1",
+                "-v",
+                workspaceDirectory.toAbsolutePath() + ":/workspace",
+                "-w",
+                "/workspace",
+                dockerImage,
+                "sh",
+                "-lc",
+                containerCommand
+        );
+
+        Process process = null;
+        try {
+            Instant startedAt = Instant.now();
+            process = new ProcessBuilder(command).start();
+
+            try (OutputStream outputStream = process.getOutputStream()) {
+                outputStream.write(context.input().getBytes(StandardCharsets.UTF_8));
+            }
+
+            boolean finished = process.waitFor(context.timeLimitMs(), TimeUnit.MILLISECONDS);
+            long executionTimeMs = Duration.between(startedAt, Instant.now()).toMillis();
+
+            if (!finished) {
+                process.destroyForcibly();
+                return new JudgeExecutionResult(false, "", "Execution timed out", null, (int) executionTimeMs, null, false);
+            }
+
+            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            int exitCode = process.exitValue();
+
+            return new JudgeExecutionResult(exitCode == 0, stdout, stderr, exitCode, (int) executionTimeMs, null, false);
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+}
