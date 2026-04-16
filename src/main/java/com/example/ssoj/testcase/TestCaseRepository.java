@@ -7,4 +7,6 @@ import java.util.List;
 public interface TestCaseRepository extends JpaRepository<TestCase, Long> {
 
     List<TestCase> findAllByProblem_Id(Long problemId);
+
+    List<TestCase> findAllByProblem_IdAndHiddenTrueOrderByIdAsc(Long problemId);
 }

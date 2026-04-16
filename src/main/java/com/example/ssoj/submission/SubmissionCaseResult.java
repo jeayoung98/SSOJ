@@ -42,6 +42,20 @@ public class SubmissionCaseResult {
     protected SubmissionCaseResult() {
     }
 
+    public SubmissionCaseResult(
+            Submission submission,
+            TestCase testCase,
+            SubmissionStatus status,
+            Integer executionTimeMs,
+            Integer memoryUsageKb
+    ) {
+        this.submission = submission;
+        this.testCase = testCase;
+        this.status = status;
+        this.executionTimeMs = executionTimeMs;
+        this.memoryUsageKb = memoryUsageKb;
+    }
+
     public Long getId() {
         return id;
     }

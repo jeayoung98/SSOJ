@@ -97,4 +97,9 @@ public class Submission {
         this.startedAt = startedAt;
         return true;
     }
+
+    public void finish(SubmissionStatus status, Instant finishedAt) {
+        this.status = status;
+        this.finishedAt = finishedAt;
+    }
 }
