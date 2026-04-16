@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,11 +22,14 @@ public class DockerProcessExecutor {
 
     public JudgeExecutionResult execute(JudgeContext context, Path workspaceDirectory, String dockerImage, String containerCommand)
             throws IOException, InterruptedException {
+        Path cidFile = workspaceDirectory.resolve(".container.cid");
         List<String> command = List.of(
                 "docker",
                 "run",
                 "--rm",
                 "-i",
+                "--cidfile",
+                "/workspace/.container.cid",
                 "--network",
                 "none",
                 "-m",
@@ -96,6 +100,47 @@ public class DockerProcessExecutor {
         } finally {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
+                log.info("Destroyed running Docker client process for submission {}", context.submissionId());
+            }
+            cleanupContainer(context.submissionId(), cidFile);
+        }
+    }
+
+    private void cleanupContainer(Long submissionId, Path cidFile) {
+        if (!Files.exists(cidFile)) {
+            return;
+        }
+
+        try {
+            String containerId = Files.readString(cidFile, StandardCharsets.UTF_8).trim();
+            if (containerId.isBlank()) {
+                return;
+            }
+
+            Process cleanupProcess = new ProcessBuilder("docker", "rm", "-f", containerId).start();
+            boolean finished = cleanupProcess.waitFor(10, TimeUnit.SECONDS);
+            if (!finished) {
+                cleanupProcess.destroyForcibly();
+                log.warn("Timed out while cleaning Docker container {} for submission {}", containerId, submissionId);
+                return;
+            }
+
+            if (cleanupProcess.exitValue() == 0) {
+                log.info("Cleaned Docker container {} for submission {}", containerId, submissionId);
+                return;
+            }
+
+            String stderr = new String(cleanupProcess.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!stderr.contains("No such container")) {
+                log.warn("Failed to clean Docker container {} for submission {}: {}", containerId, submissionId, stderr.trim());
+            }
+        } catch (Exception exception) {
+            log.warn("Cleanup failed for Docker container cid file {} of submission {}", cidFile, submissionId, exception);
+        } finally {
+            try {
+                Files.deleteIfExists(cidFile);
+            } catch (IOException exception) {
+                log.warn("Failed to delete cid file {} for submission {}", cidFile, submissionId, exception);
             }
         }
     }

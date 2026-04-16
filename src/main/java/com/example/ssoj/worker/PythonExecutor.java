@@ -109,6 +109,7 @@ public class PythonExecutor implements LanguageExecutor {
                             log.warn("Failed to delete temp path {}", path, exception);
                         }
                     });
+            log.info("Deleted temp directory {}", directory);
         } catch (IOException exception) {
             log.warn("Failed to clean temp directory {}", directory, exception);
         }
