@@ -6,6 +6,8 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
@@ -30,6 +32,18 @@ public class SsojApplication {
                         metadata.getURL(),
                         metadata.getUserName()
                 );
+            }
+        };
+    }
+
+    @Bean
+    CommandLineRunner redisConnectionCheck(StringRedisTemplate redisTemplate) {
+        return args -> {
+            try {
+                String pong = redisTemplate.getConnectionFactory().getConnection().ping();
+                log.info("Connected to Redis: ping={}", pong);
+            } catch (RedisConnectionFailureException exception) {
+                log.warn("Failed to connect to Redis during startup check", exception);
             }
         };
     }

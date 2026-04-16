@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ssoj-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  judge-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ssoj-judge-worker
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    restart: unless-stopped

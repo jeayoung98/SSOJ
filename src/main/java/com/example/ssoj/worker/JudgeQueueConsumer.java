@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -42,7 +43,15 @@ public class JudgeQueueConsumer {
             return;
         }
 
-        String value = redisTemplate.opsForList().leftPop(QUEUE_KEY);
+        String value;
+        try {
+            value = redisTemplate.opsForList().leftPop(QUEUE_KEY);
+        } catch (RedisConnectionFailureException exception) {
+            semaphore.release();
+            log.warn("Failed to connect to Redis while reading queue {}", QUEUE_KEY, exception);
+            return;
+        }
+
         if (value == null) {
             semaphore.release();
             return;
