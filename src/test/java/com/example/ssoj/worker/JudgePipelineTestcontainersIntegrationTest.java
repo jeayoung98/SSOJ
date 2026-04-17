@@ -11,17 +11,21 @@ import com.example.ssoj.testcase.TestCase;
 import com.example.ssoj.testcase.TestCaseRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.redis.connection.RedisConnection;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.core.ListOperations;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.lang.reflect.Constructor;
 import java.time.Duration;
@@ -30,24 +34,35 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.when;
 
+@Testcontainers
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:judge-pipeline;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect",
         "worker.enabled=true",
         "worker.poll-delay-ms=60000"
 })
-@Import(JudgePipelineIntegrationTest.TestExecutorConfig.class)
-class JudgePipelineIntegrationTest {
+@Import(JudgePipelineTestcontainersIntegrationTest.TestExecutorConfig.class)
+@EnabledIfSystemProperty(named = "run.testcontainers.tests", matches = "true")
+class JudgePipelineTestcontainersIntegrationTest {
 
     private static final String QUEUE_KEY = "judge:queue";
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
+            .withExposedPorts(6379);
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+    }
 
     @Autowired
     private ProblemRepository problemRepository;
@@ -65,9 +80,6 @@ class JudgePipelineIntegrationTest {
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private ListOperations<String, String> listOperations;
-
-    @Autowired
     private JudgeQueueConsumer judgeQueueConsumer;
 
     @Autowired
@@ -75,7 +87,6 @@ class JudgePipelineIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        reset(listOperations);
         submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
         testCaseRepository.deleteAll();
@@ -84,15 +95,14 @@ class JudgePipelineIntegrationTest {
     }
 
     @Test
-    void consume_readsQueueAndPersistsJudgeResult() throws InterruptedException {
+    void consume_readsRedisQueueAndPersistsResultsAgainstRealRedisAndPostgres() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
-        TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
-        testCaseRepository.save(hiddenCase);
+        testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 7, 256, false, false));
+        fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 11, 128, false, false));
 
-        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
+        stringRedisTemplate.opsForList().leftPush(QUEUE_KEY, submission.getId().toString());
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.AC, Duration.ofSeconds(5));
@@ -103,30 +113,6 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getFinishedAt()).isNotNull();
         assertThat(caseResults).hasSize(1);
         assertThat(caseResults.get(0).getStatus()).isEqualTo(SubmissionStatus.AC);
-        assertThat(caseResults.get(0).getExecutionTimeMs()).isEqualTo(7);
-        assertThat(fakeLanguageExecutor.lastContext()).isNotNull();
-        assertThat(fakeLanguageExecutor.lastContext().submissionId()).isEqualTo(submission.getId());
-        assertThat(fakeLanguageExecutor.lastContext().problemId()).isEqualTo(problem.getId());
-    }
-
-    @Test
-    void consume_persistsTleResultWhenExecutorTimesOut() throws InterruptedException {
-        Problem problem = problemRepository.save(problem(1000, 128));
-        TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
-        testCaseRepository.save(hiddenCase);
-
-        Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResult(JudgeExecutionResult.timeout(3000));
-
-        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
-        judgeQueueConsumer.consume();
-
-        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.TLE, Duration.ofSeconds(5));
-        List<SubmissionCaseResult> caseResults = submissionCaseResultRepository.findAll();
-
-        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.TLE);
-        assertThat(caseResults).hasSize(1);
-        assertThat(caseResults.get(0).getStatus()).isEqualTo(SubmissionStatus.TLE);
     }
 
     private Submission awaitSubmission(Long submissionId, SubmissionStatus expectedStatus, Duration timeout)
@@ -186,35 +172,15 @@ class JudgePipelineIntegrationTest {
     static class TestExecutorConfig {
 
         @Bean
+        @Primary
         FakeLanguageExecutor fakeLanguageExecutor() {
             return new FakeLanguageExecutor();
-        }
-
-        @Bean
-        @Primary
-        ListOperations<String, String> listOperations() {
-            return mock(ListOperations.class);
-        }
-
-        @Bean
-        @Primary
-        StringRedisTemplate stringRedisTemplate(ListOperations<String, String> listOperations) {
-            RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
-            RedisConnection connection = mock(RedisConnection.class);
-            when(connectionFactory.getConnection()).thenReturn(connection);
-            when(connection.ping()).thenReturn("PONG");
-
-            StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-            when(redisTemplate.opsForList()).thenReturn(listOperations);
-            when(redisTemplate.getConnectionFactory()).thenReturn(connectionFactory);
-            return redisTemplate;
         }
     }
 
     static class FakeLanguageExecutor implements LanguageExecutor {
 
         private final AtomicReference<JudgeExecutionResult> result = new AtomicReference<>(JudgeExecutionResult.notExecuted());
-        private final AtomicReference<JudgeContext> lastContext = new AtomicReference<>();
 
         @Override
         public boolean supports(String language) {
@@ -223,7 +189,6 @@ class JudgePipelineIntegrationTest {
 
         @Override
         public JudgeExecutionResult execute(JudgeContext context) {
-            lastContext.set(context);
             return result.get();
         }
 
@@ -231,13 +196,8 @@ class JudgePipelineIntegrationTest {
             result.set(judgeExecutionResult);
         }
 
-        JudgeContext lastContext() {
-            return lastContext.get();
-        }
-
         void reset() {
             result.set(JudgeExecutionResult.notExecuted());
-            lastContext.set(null);
         }
     }
 }

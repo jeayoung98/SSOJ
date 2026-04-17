@@ -22,6 +22,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -147,6 +148,57 @@ class JudgeServiceTest {
         verify(testCaseRepository, never()).findAllByProblem_IdAndHiddenTrueOrderByIdAsc(any());
         verify(submissionCaseResultRepository, never()).save(any(SubmissionCaseResult.class));
         assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.AC);
+    }
+
+    @Test
+    void judge_marksSubmissionAsTleWhenExecutorTimesOut() {
+        Submission submission = submission(15L, "cpp", SubmissionStatus.PENDING, problem(105L, 1000, 128));
+        TestCase testCase = testCase(205L, submission.getProblem(), "", "OK", true);
+
+        JudgeService judgeService = new JudgeService(
+                submissionRepository,
+                testCaseRepository,
+                submissionCaseResultRepository,
+                List.of(languageExecutor)
+        );
+
+        when(submissionRepository.findById(15L)).thenReturn(Optional.of(submission));
+        when(languageExecutor.supports("cpp")).thenReturn(true);
+        when(testCaseRepository.findAllByProblem_IdAndHiddenTrueOrderByIdAsc(105L)).thenReturn(List.of(testCase));
+        when(languageExecutor.execute(any(JudgeContext.class)))
+                .thenReturn(JudgeExecutionResult.timeout(1000));
+
+        judgeService.judge(15L);
+
+        ArgumentCaptor<SubmissionCaseResult> caseResultCaptor = ArgumentCaptor.forClass(SubmissionCaseResult.class);
+        verify(submissionCaseResultRepository).save(caseResultCaptor.capture());
+
+        assertThat(caseResultCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.TLE);
+        assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.TLE);
+        assertThat(submission.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void judge_marksSubmissionAsSystemErrorWhenNoExecutorMatchesLanguage() {
+        Submission submission = submission(16L, "unknown", SubmissionStatus.PENDING, problem(106L, 1000, 128));
+
+        JudgeService judgeService = new JudgeService(
+                submissionRepository,
+                testCaseRepository,
+                submissionCaseResultRepository,
+                List.of(languageExecutor)
+        );
+
+        when(submissionRepository.findById(16L)).thenReturn(Optional.of(submission));
+        when(languageExecutor.supports("unknown")).thenReturn(false);
+
+        judgeService.judge(16L);
+
+        verify(testCaseRepository, never()).findAllByProblem_IdAndHiddenTrueOrderByIdAsc(any());
+        verify(submissionCaseResultRepository, never()).save(any(SubmissionCaseResult.class));
+        assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.SYSTEM_ERROR);
+        assertThat(submission.getStartedAt()).isNotNull();
+        assertThat(submission.getFinishedAt()).isNotNull();
     }
 
     private static Problem problem(Long id, int timeLimitMs, int memoryLimitMb) {

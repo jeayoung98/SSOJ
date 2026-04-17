@@ -4,6 +4,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -26,6 +27,7 @@ public class JudgeQueueConsumer {
     private final ExecutorService executorService;
     private final Semaphore semaphore;
 
+    @Autowired
     public JudgeQueueConsumer(
             StringRedisTemplate redisTemplate,
             JudgeService judgeService,
@@ -35,6 +37,18 @@ public class JudgeQueueConsumer {
         this.judgeService = judgeService;
         this.executorService = Executors.newFixedThreadPool(maxConcurrency);
         this.semaphore = new Semaphore(maxConcurrency);
+    }
+
+    JudgeQueueConsumer(
+            StringRedisTemplate redisTemplate,
+            JudgeService judgeService,
+            ExecutorService executorService,
+            Semaphore semaphore
+    ) {
+        this.redisTemplate = redisTemplate;
+        this.judgeService = judgeService;
+        this.executorService = executorService;
+        this.semaphore = semaphore;
     }
 
     @Scheduled(fixedDelayString = "${worker.poll-delay-ms:1000}")
