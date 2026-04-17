@@ -45,6 +45,7 @@ class JudgeQueueConsumerTest {
 
     @Test
     void consume_readsSubmissionIdAndDelegatesToJudgeService() {
+        // 비동기성을 제거한 직접 실행 executor로 consume 흐름만 검증한다.
         Semaphore semaphore = new Semaphore(2);
         JudgeQueueConsumer consumer = new JudgeQueueConsumer(redisTemplate, judgeService, directExecutor, semaphore);
 
@@ -59,6 +60,7 @@ class JudgeQueueConsumerTest {
 
     @Test
     void consume_skipsInvalidPayloadAndReleasesSemaphore() {
+        // 잘못된 payload를 읽어도 permit이 회수되지 않으면 이후 consume이 막힌다.
         Semaphore semaphore = new Semaphore(2);
         JudgeQueueConsumer consumer = new JudgeQueueConsumer(redisTemplate, judgeService, directExecutor, semaphore);
 
@@ -73,6 +75,7 @@ class JudgeQueueConsumerTest {
 
     @Test
     void consume_handlesRedisConnectionFailureAndReleasesSemaphore() {
+        // Redis 장애 시에도 permit 누수가 없어야 한다.
         Semaphore semaphore = new Semaphore(2);
         JudgeQueueConsumer consumer = new JudgeQueueConsumer(redisTemplate, judgeService, directExecutor, semaphore);
 
@@ -87,6 +90,7 @@ class JudgeQueueConsumerTest {
 
     @Test
     void consume_doesNotPollRedisWhenMaxConcurrencyIsReached() {
+        // 동시성 한도를 넘긴 상태에서는 큐를 더 읽지 않아야 한다.
         Semaphore semaphore = new Semaphore(0);
         JudgeQueueConsumer consumer = new JudgeQueueConsumer(redisTemplate, judgeService, mock(ExecutorService.class), semaphore);
 
@@ -98,6 +102,7 @@ class JudgeQueueConsumerTest {
 
     @Test
     void consume_processesAtMostTwoSubmissionsConcurrently() throws InterruptedException {
+        // 실제 스레드 풀을 써서 동시에 2개까지만 실행되는지 확인한다.
         Semaphore semaphore = new Semaphore(2);
         ExecutorService executorService = java.util.concurrent.Executors.newFixedThreadPool(2);
         JudgeQueueConsumer consumer = new JudgeQueueConsumer(redisTemplate, judgeService, executorService, semaphore);
@@ -110,6 +115,7 @@ class JudgeQueueConsumerTest {
         when(listOperations.leftPop("judge:queue")).thenReturn("201", "202");
 
         org.mockito.Mockito.doAnswer(invocation -> {
+            // 두 작업이 동시에 들어온 시점을 잡아 최대 병렬 수를 기록한다.
             int running = runningCount.incrementAndGet();
             maxRunningCount.accumulateAndGet(running, Math::max);
             firstTwoStarted.countDown();
@@ -121,6 +127,7 @@ class JudgeQueueConsumerTest {
         consumer.consume();
         consumer.consume();
 
+        // 앞의 두 작업이 시작될 때까지 기다린 뒤 세 번째 consume이 큐를 읽지 않는지 본다.
         assertThat(firstTwoStarted.await(2, TimeUnit.SECONDS)).isTrue();
         assertThat(semaphore.availablePermits()).isZero();
 
@@ -136,6 +143,7 @@ class JudgeQueueConsumerTest {
     }
 
     static class DirectExecutorService implements ExecutorService {
+        // submit 즉시 현재 스레드에서 실행해 비동기 타이밍 영향을 제거한다.
 
         private boolean shutdown;
 

@@ -12,6 +12,7 @@ class CppExecutorTest {
 
     @Test
     void execute_deletesTempDirectoryAfterSuccessfulExecution() throws IOException, InterruptedException {
+        // 실제 Docker 호출 대신 workspace 생성과 cleanup 보장 여부만 검증한다.
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
                 new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false)
         );
@@ -33,6 +34,7 @@ class CppExecutorTest {
 
     @Test
     void execute_deletesTempDirectoryWhenDockerExecutionThrows() throws IOException, InterruptedException {
+        // 실패 경로에서도 finally cleanup이 동작해야 한다.
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
                 new IOException("docker start failed")
         );
@@ -57,6 +59,7 @@ class CppExecutorTest {
     }
 
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
+        // execute 호출 시점의 workspace 상태를 기록해 cleanup 전후를 비교한다.
 
         private final JudgeExecutionResult result;
         private final Exception exception;

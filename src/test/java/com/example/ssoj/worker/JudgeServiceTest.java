@@ -45,6 +45,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_finishesWithWaAndStoresEachCaseResult() {
+        // 첫 번째 케이스에서 오답이 나와도 각 케이스 결과는 모두 저장되어야 한다.
         Submission submission = submission(11L, "python", SubmissionStatus.PENDING, problem(101L, 1000, 128));
         TestCase firstCase = testCase(201L, submission.getProblem(), "1 2", "3", true);
         TestCase secondCase = testCase(202L, submission.getProblem(), "5 8", "13", true);
@@ -80,6 +81,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_mapsJavaCompileErrorToCe() {
+        // Java는 stderr에 컴파일 에러 패턴이 있으면 CE로 매핑한다.
         Submission submission = submission(12L, "java", SubmissionStatus.PENDING, problem(102L, 1000, 128));
         TestCase testCase = testCase(203L, submission.getProblem(), "", "OK", true);
 
@@ -107,6 +109,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_marksSubmissionAsSystemErrorWhenExecutorThrows() {
+        // executor 내부 예외가 바깥으로 전파되더라도 submission 상태가 방치되면 안 된다.
         Submission submission = submission(13L, "cpp", SubmissionStatus.PENDING, problem(103L, 1000, 128));
         TestCase testCase = testCase(204L, submission.getProblem(), "", "OK", true);
 
@@ -132,6 +135,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_skipsCompletedSubmission() {
+        // 이미 최종 상태인 제출은 다시 채점하지 않는다.
         Submission submission = submission(14L, "python", SubmissionStatus.AC, problem(104L, 1000, 128));
 
         JudgeService judgeService = new JudgeService(
@@ -152,6 +156,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_marksSubmissionAsTleWhenExecutorTimesOut() {
+        // timeout 결과는 케이스 결과와 최종 submission 상태 모두 TLE여야 한다.
         Submission submission = submission(15L, "cpp", SubmissionStatus.PENDING, problem(105L, 1000, 128));
         TestCase testCase = testCase(205L, submission.getProblem(), "", "OK", true);
 
@@ -180,6 +185,7 @@ class JudgeServiceTest {
 
     @Test
     void judge_marksSubmissionAsSystemErrorWhenNoExecutorMatchesLanguage() {
+        // 지원하지 않는 language 값은 즉시 SYSTEM_ERROR로 마감한다.
         Submission submission = submission(16L, "unknown", SubmissionStatus.PENDING, problem(106L, 1000, 128));
 
         JudgeService judgeService = new JudgeService(
@@ -197,6 +203,37 @@ class JudgeServiceTest {
         verify(testCaseRepository, never()).findAllByProblem_IdAndHiddenTrueOrderByIdAsc(any());
         verify(submissionCaseResultRepository, never()).save(any(SubmissionCaseResult.class));
         assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.SYSTEM_ERROR);
+        assertThat(submission.getStartedAt()).isNotNull();
+        assertThat(submission.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void judge_keepsSubmissionAsAcWhenExecutionIsSlowButWithinTimeLimit() {
+        // 실행 시간이 길어도 timeout 플래그가 아니면 정상 완료로 처리되어야 한다.
+        Submission submission = submission(17L, "python", SubmissionStatus.PENDING, problem(107L, 3000, 128));
+        TestCase testCase = testCase(206L, submission.getProblem(), "", "OK", true);
+
+        JudgeService judgeService = new JudgeService(
+                submissionRepository,
+                testCaseRepository,
+                submissionCaseResultRepository,
+                List.of(languageExecutor)
+        );
+
+        when(submissionRepository.findById(17L)).thenReturn(Optional.of(submission));
+        when(languageExecutor.supports("python")).thenReturn(true);
+        when(testCaseRepository.findAllByProblem_IdAndHiddenTrueOrderByIdAsc(107L)).thenReturn(List.of(testCase));
+        when(languageExecutor.execute(any(JudgeContext.class)))
+                .thenReturn(new JudgeExecutionResult(true, "OK\n", "", 0, 2400, 64, false, false));
+
+        judgeService.judge(17L);
+
+        ArgumentCaptor<SubmissionCaseResult> caseResultCaptor = ArgumentCaptor.forClass(SubmissionCaseResult.class);
+        verify(submissionCaseResultRepository).save(caseResultCaptor.capture());
+
+        assertThat(caseResultCaptor.getValue().getStatus()).isEqualTo(SubmissionStatus.AC);
+        assertThat(caseResultCaptor.getValue().getExecutionTimeMs()).isEqualTo(2400);
+        assertThat(submission.getStatus()).isEqualTo(SubmissionStatus.AC);
         assertThat(submission.getStartedAt()).isNotNull();
         assertThat(submission.getFinishedAt()).isNotNull();
     }
@@ -234,6 +271,7 @@ class JudgeServiceTest {
 
     private static <T> T instantiate(Class<T> type) {
         try {
+            // 엔티티 기본 생성자가 protected/private이어도 테스트 데이터는 최소 비용으로 만든다.
             Constructor<T> constructor = type.getDeclaredConstructor();
             constructor.setAccessible(true);
             return constructor.newInstance();

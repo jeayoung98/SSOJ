@@ -75,6 +75,7 @@ class JudgePipelineIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        // 같은 ApplicationContext를 재사용하므로 mock 상태와 DB 데이터를 매 테스트마다 초기화한다.
         reset(listOperations);
         submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
@@ -85,6 +86,7 @@ class JudgePipelineIntegrationTest {
 
     @Test
     void consume_readsQueueAndPersistsJudgeResult() throws InterruptedException {
+        // Redis consume부터 DB 결과 저장까지 최소 파이프라인을 검증한다.
         Problem problem = problemRepository.save(problem(1000, 128));
         TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
         testCaseRepository.save(hiddenCase);
@@ -111,6 +113,7 @@ class JudgePipelineIntegrationTest {
 
     @Test
     void consume_persistsTleResultWhenExecutorTimesOut() throws InterruptedException {
+        // executor timeout 결과가 submission과 case result에 그대로 반영되어야 한다.
         Problem problem = problemRepository.save(problem(1000, 128));
         TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
         testCaseRepository.save(hiddenCase);
@@ -131,6 +134,7 @@ class JudgePipelineIntegrationTest {
 
     private Submission awaitSubmission(Long submissionId, SubmissionStatus expectedStatus, Duration timeout)
             throws InterruptedException {
+        // JudgeQueueConsumer는 별도 스레드 풀을 사용하므로 상태 반영을 polling으로 기다린다.
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
             Submission submission = submissionRepository.findById(submissionId).orElseThrow();
@@ -174,6 +178,7 @@ class JudgePipelineIntegrationTest {
 
     private static <T> T instantiate(Class<T> type) {
         try {
+            // 테스트에서는 엔티티 생성 편의성을 위해 리플렉션으로 최소 필드만 채운다.
             Constructor<T> constructor = type.getDeclaredConstructor();
             constructor.setAccessible(true);
             return constructor.newInstance();
@@ -199,6 +204,7 @@ class JudgePipelineIntegrationTest {
         @Bean
         @Primary
         StringRedisTemplate stringRedisTemplate(ListOperations<String, String> listOperations) {
+            // 실제 Redis 없이 queue consume 경로만 검증할 수 있도록 템플릿 전체를 mock 처리한다.
             RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
             RedisConnection connection = mock(RedisConnection.class);
             when(connectionFactory.getConnection()).thenReturn(connection);
@@ -212,6 +218,7 @@ class JudgePipelineIntegrationTest {
     }
 
     static class FakeLanguageExecutor implements LanguageExecutor {
+        // 언어 executor 결과를 테스트가 원하는 값으로 고정하기 위한 대역 객체다.
 
         private final AtomicReference<JudgeExecutionResult> result = new AtomicReference<>(JudgeExecutionResult.notExecuted());
         private final AtomicReference<JudgeContext> lastContext = new AtomicReference<>();
