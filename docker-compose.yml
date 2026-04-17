@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ssoj-postgres
+    environment:
+      POSTGRES_DB: ssoj
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ssoj-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     container_name: ssoj-redis
@@ -12,10 +25,17 @@ services:
       dockerfile: Dockerfile
     container_name: ssoj-judge-worker
     depends_on:
+      - postgres
       - redis
-    env_file:
-      - .env
     environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ssoj
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+
+volumes:
+  ssoj-postgres-data:
