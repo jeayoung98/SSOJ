@@ -14,9 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.ListOperations;
@@ -26,7 +26,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.lang.reflect.Constructor;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,9 +65,6 @@ class JudgePipelineIntegrationTest {
     private SubmissionCaseResultRepository submissionCaseResultRepository;
 
     @Autowired
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Autowired
     private ListOperations<String, String> listOperations;
 
     @Autowired
@@ -75,7 +75,6 @@ class JudgePipelineIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        // 같은 ApplicationContext를 재사용하므로 mock 상태와 DB 데이터를 매 테스트마다 초기화한다.
         reset(listOperations);
         submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
@@ -85,56 +84,92 @@ class JudgePipelineIntegrationTest {
     }
 
     @Test
-    void consume_readsQueueAndPersistsJudgeResult() throws InterruptedException {
-        // Redis consume부터 DB 결과 저장까지 최소 파이프라인을 검증한다.
+    void consume_finishesSubmissionAndPersistsAcCaseResult() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
-        TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
-        testCaseRepository.save(hiddenCase);
+        testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 7, 256, false, false));
+        fakeLanguageExecutor.setResults(new JudgeExecutionResult(true, "3\n", "", 0, 7, 256, false, false));
 
         when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.AC, Duration.ofSeconds(5));
-        List<SubmissionCaseResult> caseResults = submissionCaseResultRepository.findAll();
+        List<SubmissionCaseResult> caseResults = submissionCaseResults(submission.getId());
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.AC);
         assertThat(finishedSubmission.getStartedAt()).isNotNull();
         assertThat(finishedSubmission.getFinishedAt()).isNotNull();
+        assertThat(finishedSubmission.getFinishedAt()).isAfterOrEqualTo(finishedSubmission.getStartedAt());
         assertThat(caseResults).hasSize(1);
         assertThat(caseResults.get(0).getStatus()).isEqualTo(SubmissionStatus.AC);
         assertThat(caseResults.get(0).getExecutionTimeMs()).isEqualTo(7);
+        assertThat(fakeLanguageExecutor.executedContexts()).hasSize(1);
         assertThat(fakeLanguageExecutor.lastContext()).isNotNull();
         assertThat(fakeLanguageExecutor.lastContext().submissionId()).isEqualTo(submission.getId());
         assertThat(fakeLanguageExecutor.lastContext().problemId()).isEqualTo(problem.getId());
     }
 
     @Test
-    void consume_persistsTleResultWhenExecutorTimesOut() throws InterruptedException {
-        // executor timeout 결과가 submission과 case result에 그대로 반영되어야 한다.
+    void consume_finishesSubmissionWithTleWhenFirstHiddenCaseTimesOut() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
-        TestCase hiddenCase = testCase(problem, "1 2", "3\n", true);
-        testCaseRepository.save(hiddenCase);
+        testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResult(JudgeExecutionResult.timeout(3000));
+        fakeLanguageExecutor.setResults(JudgeExecutionResult.timeout(3000));
 
         when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.TLE, Duration.ofSeconds(5));
-        List<SubmissionCaseResult> caseResults = submissionCaseResultRepository.findAll();
+        List<SubmissionCaseResult> caseResults = submissionCaseResults(submission.getId());
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.TLE);
+        assertThat(finishedSubmission.getStartedAt()).isNotNull();
+        assertThat(finishedSubmission.getFinishedAt()).isNotNull();
+        assertThat(finishedSubmission.getFinishedAt()).isAfterOrEqualTo(finishedSubmission.getStartedAt());
         assertThat(caseResults).hasSize(1);
         assertThat(caseResults.get(0).getStatus()).isEqualTo(SubmissionStatus.TLE);
+        assertThat(caseResults.get(0).getExecutionTimeMs()).isEqualTo(3000);
+        assertThat(fakeLanguageExecutor.executedContexts()).hasSize(1);
+    }
+
+    @Test
+    void consume_stopsAfterFirstHiddenCaseFailure_andDoesNotPersistLaterCases() throws InterruptedException {
+        Problem problem = problemRepository.save(problem(1000, 128));
+        TestCase firstCase = testCaseRepository.save(testCase(problem, "1", "1\n", true));
+        TestCase secondCase = testCaseRepository.save(testCase(problem, "2", "2\n", true));
+        testCaseRepository.save(testCase(problem, "3", "3\n", true));
+
+        Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
+        fakeLanguageExecutor.setResults(
+                new JudgeExecutionResult(true, "1\n", "", 0, 5, 64, false, false),
+                new JudgeExecutionResult(true, "wrong\n", "", 0, 6, 64, false, false),
+                new JudgeExecutionResult(true, "3\n", "", 0, 7, 64, false, false)
+        );
+
+        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
+        judgeQueueConsumer.consume();
+
+        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.WA, Duration.ofSeconds(5));
+        List<SubmissionCaseResult> caseResults = submissionCaseResults(submission.getId());
+
+        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.WA);
+        assertThat(finishedSubmission.getStartedAt()).isNotNull();
+        assertThat(finishedSubmission.getFinishedAt()).isNotNull();
+        assertThat(finishedSubmission.getFinishedAt()).isAfterOrEqualTo(finishedSubmission.getStartedAt());
+        assertThat(caseResults).hasSize(2);
+        assertThat(caseResults)
+                .extracting(result -> result.getTestCase().getId())
+                .containsExactly(firstCase.getId(), secondCase.getId());
+        assertThat(caseResults)
+                .extracting(SubmissionCaseResult::getStatus)
+                .containsExactly(SubmissionStatus.AC, SubmissionStatus.WA);
+        assertThat(fakeLanguageExecutor.executedContexts()).hasSize(2);
     }
 
     private Submission awaitSubmission(Long submissionId, SubmissionStatus expectedStatus, Duration timeout)
             throws InterruptedException {
-        // JudgeQueueConsumer는 별도 스레드 풀을 사용하므로 상태 반영을 polling으로 기다린다.
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
             Submission submission = submissionRepository.findById(submissionId).orElseThrow();
@@ -146,6 +181,13 @@ class JudgePipelineIntegrationTest {
 
         Submission current = submissionRepository.findById(submissionId).orElseThrow();
         throw new AssertionError("Timed out waiting for submission status. currentStatus=" + current.getStatus());
+    }
+
+    private List<SubmissionCaseResult> submissionCaseResults(Long submissionId) {
+        return submissionCaseResultRepository.findAll().stream()
+                .filter(result -> result.getSubmission().getId().equals(submissionId))
+                .sorted(Comparator.comparing(SubmissionCaseResult::getId))
+                .toList();
     }
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {
@@ -178,7 +220,6 @@ class JudgePipelineIntegrationTest {
 
     private static <T> T instantiate(Class<T> type) {
         try {
-            // 테스트에서는 엔티티 생성 편의성을 위해 리플렉션으로 최소 필드만 채운다.
             Constructor<T> constructor = type.getDeclaredConstructor();
             constructor.setAccessible(true);
             return constructor.newInstance();
@@ -204,7 +245,6 @@ class JudgePipelineIntegrationTest {
         @Bean
         @Primary
         StringRedisTemplate stringRedisTemplate(ListOperations<String, String> listOperations) {
-            // 실제 Redis 없이 queue consume 경로만 검증할 수 있도록 템플릿 전체를 mock 처리한다.
             RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
             RedisConnection connection = mock(RedisConnection.class);
             when(connectionFactory.getConnection()).thenReturn(connection);
@@ -218,10 +258,12 @@ class JudgePipelineIntegrationTest {
     }
 
     static class FakeLanguageExecutor implements LanguageExecutor {
-        // 언어 executor 결과를 테스트가 원하는 값으로 고정하기 위한 대역 객체다.
 
-        private final AtomicReference<JudgeExecutionResult> result = new AtomicReference<>(JudgeExecutionResult.notExecuted());
+        private final AtomicReference<JudgeExecutionResult> fallbackResult =
+                new AtomicReference<>(JudgeExecutionResult.notExecuted());
+        private final ConcurrentLinkedQueue<JudgeExecutionResult> results = new ConcurrentLinkedQueue<>();
         private final AtomicReference<JudgeContext> lastContext = new AtomicReference<>();
+        private final List<JudgeContext> executedContexts = new ArrayList<>();
 
         @Override
         public boolean supports(String language) {
@@ -229,22 +271,44 @@ class JudgePipelineIntegrationTest {
         }
 
         @Override
-        public JudgeExecutionResult execute(JudgeContext context) {
+        public synchronized JudgeExecutionResult execute(JudgeContext context) {
             lastContext.set(context);
-            return result.get();
+            executedContexts.add(context);
+
+            JudgeExecutionResult nextResult = results.poll();
+            if (nextResult != null) {
+                return nextResult;
+            }
+
+            return fallbackResult.get();
         }
 
-        void setResult(JudgeExecutionResult judgeExecutionResult) {
-            result.set(judgeExecutionResult);
+        void setResults(JudgeExecutionResult... judgeExecutionResults) {
+            results.clear();
+            for (JudgeExecutionResult judgeExecutionResult : judgeExecutionResults) {
+                results.add(judgeExecutionResult);
+            }
+
+            if (judgeExecutionResults.length > 0) {
+                fallbackResult.set(judgeExecutionResults[judgeExecutionResults.length - 1]);
+            } else {
+                fallbackResult.set(JudgeExecutionResult.notExecuted());
+            }
         }
 
         JudgeContext lastContext() {
             return lastContext.get();
         }
 
+        synchronized List<JudgeContext> executedContexts() {
+            return List.copyOf(executedContexts);
+        }
+
         void reset() {
-            result.set(JudgeExecutionResult.notExecuted());
+            fallbackResult.set(JudgeExecutionResult.notExecuted());
+            results.clear();
             lastContext.set(null);
+            executedContexts.clear();
         }
     }
 }
