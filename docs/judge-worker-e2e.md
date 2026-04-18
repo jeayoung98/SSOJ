@@ -31,7 +31,21 @@
 - 채점 정책:
   - hidden test case 순차 실행
   - 첫 실패 시 즉시 중단
+  - 실행된 case까지만 `submission_case_result` 저장
   - `started_at`, `finished_at`, 최종 `submission.status` 저장
+
+## 현재 구현됨
+
+- Java, Python, C++ 모두 로컬 E2E 검증 대상에 포함
+- Java compile error는 현재 구현상 `CE`를 기대할 수 있음
+- Python은 compile 단계 없이 실행 결과 기준으로 판정
+- C++ executor는 구현되어 있어 AC, WA, RE, TLE 흐름을 로컬에서 직접 검증할 수 있음
+
+## 추가 개선 필요
+
+- C++ compile error는 현재 Java처럼 명확히 `CE`로 분류된다고 가정하면 안 됨
+- 현재 `JudgeService`는 Java에만 `CE` 분류 규칙을 적용함
+- 따라서 C++ compile error 샘플은 "현재 실제 저장 결과 확인" 기준으로 검증해야 함
 
 ## 가정하는 문제
 
@@ -62,6 +76,10 @@
 - RE: `samples/submissions/java/re/Main.java`
 - TLE: `samples/submissions/java/tle/Main.java`
 
+메모:
+
+- 현재 구현 기준으로 Java compile error는 `CE`를 기대할 수 있습니다.
+
 ### Python
 
 - AC: `samples/submissions/python/ac/main.py`
@@ -78,14 +96,16 @@
 
 - AC: `samples/submissions/cpp/ac/main.cpp`
 - WA: `samples/submissions/cpp/wa/main.cpp`
-- CE: `samples/submissions/cpp/ce/main.cpp`
+- CE 확인용: `samples/submissions/cpp/ce/main.cpp`
 - RE: `samples/submissions/cpp/re/main.cpp`
 - TLE: `samples/submissions/cpp/tle/main.cpp`
 
 메모:
 
-- 현재 `CppExecutor`가 구현되어 있어 로컬 검증 범위에 포함됩니다.
-- C++ compile error 분류 결과는 현재 구현을 그대로 확인하는 기준으로 검증합니다.
+- 현재 `CppExecutor`는 구현되어 있습니다.
+- AC, WA, RE, TLE는 현재 구현 범위에서 직접 확인 가능합니다.
+- C++ compile error는 현재 Java처럼 `CE`가 보장되지 않습니다.
+- C++ CE 샘플은 "현재 실제로 어떤 최종 상태가 저장되는지"를 확인하는 용도로 사용합니다.
 
 ## 수동 검증 순서
 
@@ -119,9 +139,13 @@
   - 첫 오답 case에서 중단
   - 그 시점까지의 결과만 저장
   - 최종 `submission.status=WA`
-- CE:
-  - compile 실패가 분류되면 최종 상태 반영
+- Java CE:
+  - compile 실패가 분류되면 최종 `submission.status=CE`
   - `finished_at` 저장
+- C++ compile error:
+  - 현재 구현 기준으로 `CE`를 고정 기대하지 않음
+  - 실제 저장 결과를 확인
+  - `finished_at` 저장 여부를 확인
 - RE:
   - 실행 실패 시 최종 `submission.status=RE`
 - TLE:

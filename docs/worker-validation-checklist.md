@@ -34,6 +34,19 @@
   - 실행된 case까지만 결과 저장
   - `started_at`, `finished_at`, 최종 상태 저장
 
+## 현재 구현됨
+
+- Java, Python, C++ executor 존재
+- Java compile error는 현재 구현상 `CE` 기대 가능
+- C++ executor는 로컬 검증 범위에 포함
+- 첫 실패 이후 뒤 test case는 실행되지 않음
+
+## 추가 개선 필요
+
+- C++ compile error를 Java처럼 확정적으로 `CE`로 분류하는 규칙은 아직 없음
+- C++ compile error 검증은 현재 저장 결과를 확인하는 방식으로만 해석해야 함
+- 언어별 세부 에러 매핑은 추가 정리 필요
+
 ## 공통 준비
 
 문제와 hidden test case 준비:
@@ -103,15 +116,16 @@ redis-cli LPUSH judge:queue <submissionId>
 
 - AC: `samples/submissions/cpp/ac/main.cpp`
 - WA: `samples/submissions/cpp/wa/main.cpp`
-- CE: `samples/submissions/cpp/ce/main.cpp`
+- CE 확인용: `samples/submissions/cpp/ce/main.cpp`
 - RE: `samples/submissions/cpp/re/main.cpp`
 - TLE: `samples/submissions/cpp/tle/main.cpp`
 
 확인:
 
-- 최종 `submission.status`가 현재 구현 결과와 일치하는지
+- AC, WA, RE, TLE가 현재 구현 결과와 일치하는지
 - `started_at`, `finished_at`이 저장됐는지
 - 첫 실패 시 뒤 test case 결과가 저장되지 않는지
+- C++ compile error는 `CE`를 고정 기대하지 않고 실제 최종 상태를 확인하는지
 
 ## 동시성 검증
 

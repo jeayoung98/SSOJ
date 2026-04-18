@@ -32,7 +32,22 @@
 - 채점 정책:
   - hidden test case를 id 오름차순으로 실행
   - 첫 실패 시 즉시 중단
+  - 실행된 case까지만 `submission_case_result` 저장
   - `started_at`, `finished_at`, 최종 `submission.status` 저장
+
+## 현재 구현됨
+
+- Java executor, Python executor, C++ executor가 모두 구현되어 있음
+- Java compile error는 `stderr`에 `error:`가 포함되면 `CE`로 분류
+- timeout은 `TLE`, executor 예외는 `SYSTEM_ERROR`로 처리
+- hidden test case가 없으면 현재 구현상 `AC`로 종료
+
+## 추가 개선 필요
+
+- C++ compile error는 현재 Java처럼 명확한 `CE` 분류가 보장되지 않음
+- 현재 `JudgeService`의 compile error 분류 로직은 Java 전용임
+- 따라서 C++ compile error는 실제 실행 결과에 따라 `RE` 등으로 보일 수 있음
+- 언어별 stderr 분류 규칙과 세부 에러 매핑은 운영 적용 전 재설계 필요
 
 ## 필요한 로컬 환경
 
