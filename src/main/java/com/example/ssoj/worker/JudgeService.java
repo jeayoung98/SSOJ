@@ -1,16 +1,9 @@
 package com.example.ssoj.worker;
 
-import com.example.ssoj.submission.Submission;
-import com.example.ssoj.submission.SubmissionCaseResult;
-import com.example.ssoj.submission.SubmissionCaseResultRepository;
-import com.example.ssoj.submission.SubmissionRepository;
 import com.example.ssoj.submission.SubmissionStatus;
-import com.example.ssoj.testcase.TestCase;
-import com.example.ssoj.testcase.TestCaseRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -20,90 +13,82 @@ import java.util.List;
 public class JudgeService {
 
     private static final Logger log = LoggerFactory.getLogger(JudgeService.class);
-    private final SubmissionRepository submissionRepository;
-    private final TestCaseRepository testCaseRepository;
-    private final SubmissionCaseResultRepository submissionCaseResultRepository;
+
+    private final JudgePersistenceService judgePersistenceService;
     private final List<LanguageExecutor> languageExecutors;
 
     public JudgeService(
-            SubmissionRepository submissionRepository,
-            TestCaseRepository testCaseRepository,
-            SubmissionCaseResultRepository submissionCaseResultRepository,
+            JudgePersistenceService judgePersistenceService,
             List<LanguageExecutor> languageExecutors
     ) {
-        this.submissionRepository = submissionRepository;
-        this.testCaseRepository = testCaseRepository;
-        this.submissionCaseResultRepository = submissionCaseResultRepository;
+        this.judgePersistenceService = judgePersistenceService;
         this.languageExecutors = languageExecutors;
     }
 
-    @Transactional
     public void judge(Long submissionId) {
-        Submission submission = submissionRepository.findById(submissionId).orElse(null);
-        if (submission == null) {
-            log.warn("Submission {} does not exist", submissionId);
+        StartedJudging startedJudging = judgePersistenceService.startJudging(submissionId);
+        if (startedJudging == null) {
             return;
         }
 
-        if (submission.isCompleted()) {
-            log.info("Submission {} is already completed with status={}", submissionId, submission.getStatus());
-            return;
-        }
-
-        boolean updated = submission.markAsJudging(Instant.now());
-        if (!updated) {
-            log.info("Submission {} is ignored because current status={}", submissionId, submission.getStatus());
-            return;
-        }
-
-        log.info("Submission {} changed from PENDING to JUDGING", submissionId);
-
-        SubmissionStatus finalStatus = SubmissionStatus.SYSTEM_ERROR;
+        JudgeRunResult runResult = JudgeRunResult.systemError();
         try {
-            LanguageExecutor executor = findExecutor(submission.getLanguage());
-            if (executor == null) {
-                log.warn("No LanguageExecutor found for language={}", submission.getLanguage());
-            } else {
-                List<TestCase> hiddenTestCases = testCaseRepository.findAllByProblem_IdAndHiddenTrueOrderByIdAsc(
-                        submission.getProblem().getId()
-                );
-
-                finalStatus = SubmissionStatus.AC;
-                for (TestCase testCase : hiddenTestCases) {
-                    JudgeContext context = new JudgeContext(
-                            submission.getId(),
-                            submission.getProblem().getId(),
-                            submission.getLanguage(),
-                            submission.getSourceCode(),
-                            testCase.getInput(),
-                            submission.getProblem().getTimeLimitMs(),
-                            submission.getProblem().getMemoryLimitMb()
-                    );
-
-                    JudgeExecutionResult executionResult = executor.execute(context);
-                    SubmissionStatus caseStatus = determineCaseStatus(submission.getLanguage(), executionResult, testCase);
-
-                    submissionCaseResultRepository.save(new SubmissionCaseResult(
-                            submission,
-                            testCase,
-                            caseStatus,
-                            executionResult.executionTimeMs(),
-                            executionResult.memoryUsageKb()
-                    ));
-
-                    if (finalStatus == SubmissionStatus.AC && caseStatus != SubmissionStatus.AC) {
-                        finalStatus = caseStatus;
-                    }
-                }
-            }
+            runResult = runJudgeLogic(startedJudging);
         } catch (Exception exception) {
             log.error("JudgeService failed while processing submission {}", submissionId, exception);
-            finalStatus = SubmissionStatus.SYSTEM_ERROR;
         } finally {
-            submission.finish(finalStatus, Instant.now());
+            judgePersistenceService.saveResultsAndFinish(
+                    submissionId,
+                    runResult,
+                    Instant.now()
+            );
+        }
+    }
+
+    JudgeRunResult runJudgeLogic(StartedJudging startedJudging) {
+        LanguageExecutor executor = findExecutor(startedJudging.language());
+        if (executor == null) {
+            log.warn("No LanguageExecutor found for language={}", startedJudging.language());
+            return JudgeRunResult.systemError();
         }
 
-        log.info("Submission {} finished with status={}", submissionId, finalStatus);
+        List<HiddenTestCaseSnapshot> hiddenTestCases = startedJudging.hiddenTestCases();
+        if (hiddenTestCases.isEmpty()) {
+            log.info("Submission {} has no hidden test cases. Finishing with AC.", startedJudging.submissionId());
+            return new JudgeRunResult(List.of(), SubmissionStatus.AC);
+        }
+
+        List<CaseJudgeResult> caseResults = new java.util.ArrayList<>();
+        SubmissionStatus finalStatus = SubmissionStatus.AC;
+
+        for (HiddenTestCaseSnapshot testCase : hiddenTestCases) {
+            JudgeContext context = new JudgeContext(
+                    startedJudging.submissionId(),
+                    startedJudging.problemId(),
+                    startedJudging.language(),
+                    startedJudging.sourceCode(),
+                    testCase.input(),
+                    startedJudging.timeLimitMs(),
+                    startedJudging.memoryLimitMb()
+            );
+
+            JudgeExecutionResult executionResult = executor.execute(context);
+            SubmissionStatus caseStatus = determineCaseStatus(startedJudging.language(), executionResult, testCase.expectedOutput());
+
+            caseResults.add(new CaseJudgeResult(
+                    testCase.testCaseId(),
+                    caseStatus,
+                    executionResult.executionTimeMs(),
+                    executionResult.memoryUsageKb()
+            ));
+
+            if (caseStatus != SubmissionStatus.AC) {
+                finalStatus = caseStatus;
+                break;
+            }
+        }
+
+        return new JudgeRunResult(caseResults, finalStatus);
     }
 
     private LanguageExecutor findExecutor(String language) {
@@ -116,7 +101,11 @@ public class JudgeService {
         return null;
     }
 
-    private SubmissionStatus determineCaseStatus(String language, JudgeExecutionResult executionResult, TestCase testCase) {
+    private SubmissionStatus determineCaseStatus(
+            String language,
+            JudgeExecutionResult executionResult,
+            String expectedOutput
+    ) {
         if (executionResult.systemError()) {
             return SubmissionStatus.SYSTEM_ERROR;
         }
@@ -126,14 +115,16 @@ public class JudgeService {
         }
 
         if (!executionResult.success()) {
-            if ("java".equalsIgnoreCase(language) && executionResult.stderr() != null && executionResult.stderr().contains("error:")) {
+            if ("java".equalsIgnoreCase(language)
+                    && executionResult.stderr() != null
+                    && executionResult.stderr().contains("error:")) {
                 return SubmissionStatus.CE;
             }
 
             return SubmissionStatus.RE;
         }
 
-        if (!matchesExpectedOutput(executionResult.stdout(), testCase.getOutput())) {
+        if (!matchesExpectedOutput(executionResult.stdout(), expectedOutput)) {
             return SubmissionStatus.WA;
         }
 
