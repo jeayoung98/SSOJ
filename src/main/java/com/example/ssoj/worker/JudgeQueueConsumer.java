@@ -17,6 +17,7 @@ import java.util.concurrent.Semaphore;
 
 @ConditionalOnProperty(name = "worker.enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnProperty(name = "worker.mode", havingValue = "redis-polling", matchIfMissing = true)
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 @Component
 public class JudgeQueueConsumer {
 

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @ConditionalOnProperty(name = "judge.dispatch.mode", havingValue = "cloud-tasks")
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 public class CloudTasksJudgeDispatchService implements JudgeDispatchPort {
 
     private static final Logger log = LoggerFactory.getLogger(CloudTasksJudgeDispatchService.class);

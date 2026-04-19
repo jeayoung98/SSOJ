@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @ConditionalOnProperty(name = "judge.dispatch.mode", havingValue = "redis", matchIfMissing = true)
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 public class RedisJudgeDispatchService implements JudgeDispatchPort {
 
     private final StringRedisTemplate redisTemplate;

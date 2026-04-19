@@ -2,6 +2,7 @@ package com.example.ssoj.worker;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -15,6 +16,7 @@ public class HttpRemoteExecutionClient implements RemoteExecutionClient {
     private final RestTemplate restTemplate;
     private final String executeUrl;
 
+    @Autowired
     public HttpRemoteExecutionClient(
             @Value("${judge.execution.remote.base-url}") String baseUrl,
             @Value("${judge.execution.remote.execute-path:/internal/runner-executions}") String executePath,

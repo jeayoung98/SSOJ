@@ -8,6 +8,7 @@ import com.example.ssoj.submission.SubmissionStatus;
 import com.example.ssoj.testcase.TestCaseRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 
 @Service
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 public class JudgePersistenceService {
 
     private static final Logger log = LoggerFactory.getLogger(JudgePersistenceService.class);

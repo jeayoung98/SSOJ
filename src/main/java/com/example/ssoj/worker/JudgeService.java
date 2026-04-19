@@ -3,6 +3,7 @@ package com.example.ssoj.worker;
 import com.example.ssoj.submission.SubmissionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -10,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Service
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 public class JudgeService {
 
     private static final Logger log = LoggerFactory.getLogger(JudgeService.class);

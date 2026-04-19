@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnProperty(name = "worker.mode", havingValue = "http-trigger")
+@ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
 @RestController
 @RequestMapping("/internal/judge-executions")
 public class JudgeExecutionController {
