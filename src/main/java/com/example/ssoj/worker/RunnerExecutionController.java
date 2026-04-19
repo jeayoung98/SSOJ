@@ -1,10 +1,12 @@
 package com.example.ssoj.worker;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@ConditionalOnProperty(name = "worker.role", havingValue = "runner")
 @RestController
 @RequestMapping("/internal/runner-executions")
 public class RunnerExecutionController {

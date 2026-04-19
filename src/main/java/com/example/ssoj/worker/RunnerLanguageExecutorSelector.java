@@ -1,10 +1,12 @@
 package com.example.ssoj.worker;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
+@ConditionalOnProperty(name = "worker.role", havingValue = "runner")
 public class RunnerLanguageExecutorSelector {
 
     private final List<LanguageExecutor> languageExecutors;

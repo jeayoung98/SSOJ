@@ -2,9 +2,11 @@ package com.example.ssoj.worker;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
+@ConditionalOnProperty(name = "worker.role", havingValue = "runner")
 public class RunnerExecutionService {
 
     private static final Logger log = LoggerFactory.getLogger(RunnerExecutionService.class);
