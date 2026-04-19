@@ -15,14 +15,14 @@ public class JudgeService {
     private static final Logger log = LoggerFactory.getLogger(JudgeService.class);
 
     private final JudgePersistenceService judgePersistenceService;
-    private final List<LanguageExecutor> languageExecutors;
+    private final ExecutionGateway executionGateway;
 
     public JudgeService(
             JudgePersistenceService judgePersistenceService,
-            List<LanguageExecutor> languageExecutors
+            ExecutionGateway executionGateway
     ) {
         this.judgePersistenceService = judgePersistenceService;
-        this.languageExecutors = languageExecutors;
+        this.executionGateway = executionGateway;
     }
 
     public void judge(Long submissionId) {
@@ -46,9 +46,8 @@ public class JudgeService {
     }
 
     JudgeRunResult runJudgeLogic(StartedJudging startedJudging) {
-        LanguageExecutor executor = findExecutor(startedJudging.language());
-        if (executor == null) {
-            log.warn("No LanguageExecutor found for language={}", startedJudging.language());
+        if (!executionGateway.supports(startedJudging.language())) {
+            log.warn("No ExecutionGateway support found for language={}", startedJudging.language());
             return JudgeRunResult.systemError();
         }
 
@@ -72,7 +71,7 @@ public class JudgeService {
                     startedJudging.memoryLimitMb()
             );
 
-            JudgeExecutionResult executionResult = executor.execute(context);
+            JudgeExecutionResult executionResult = executionGateway.execute(context);
             SubmissionStatus caseStatus = determineCaseStatus(startedJudging.language(), executionResult, testCase.expectedOutput());
 
             caseResults.add(new CaseJudgeResult(
@@ -89,16 +88,6 @@ public class JudgeService {
         }
 
         return new JudgeRunResult(caseResults, finalStatus);
-    }
-
-    private LanguageExecutor findExecutor(String language) {
-        for (LanguageExecutor languageExecutor : languageExecutors) {
-            if (languageExecutor.supports(language)) {
-                return languageExecutor;
-            }
-        }
-
-        return null;
     }
 
     private SubmissionStatus determineCaseStatus(

@@ -9,7 +9,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -25,7 +24,7 @@ class JudgeServiceTest {
     private JudgePersistenceService judgePersistenceService;
 
     @Mock
-    private LanguageExecutor languageExecutor;
+    private ExecutionGateway executionGateway;
 
     @Test
     void judge_stopsAtFirstFailure_andFinishesWithWa() {
@@ -40,12 +39,12 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(11L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("python")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class)))
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
                 .thenReturn(new JudgeExecutionResult(true, "4\n", "", 0, 12, 64, false, false));
 
         judgeService.judge(11L);
@@ -53,7 +52,7 @@ class JudgeServiceTest {
         ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
         ArgumentCaptor<Instant> finishedAtCaptor = ArgumentCaptor.forClass(Instant.class);
 
-        verify(languageExecutor, times(1)).execute(any(JudgeContext.class));
+        verify(executionGateway, times(1)).execute(any(JudgeContext.class));
         verify(judgePersistenceService).saveResultsAndFinish(eq(11L), runResultCaptor.capture(), finishedAtCaptor.capture());
 
         JudgeRunResult runResult = runResultCaptor.getValue();
@@ -74,12 +73,12 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(12L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("java")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class)))
+        when(executionGateway.supports("java")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
                 .thenReturn(new JudgeExecutionResult(false, "", "Main.java:1: error: ';' expected", 1, 5, 64, false, false));
 
         judgeService.judge(12L);
@@ -107,12 +106,12 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(13L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("cpp")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class))).thenThrow(new RuntimeException("docker failed"));
+        when(executionGateway.supports("cpp")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class))).thenThrow(new RuntimeException("docker failed"));
 
         judgeService.judge(13L);
 
@@ -130,15 +129,15 @@ class JudgeServiceTest {
     void judge_skipsAlreadyCompletedSubmission_withoutFinishingAgain() {
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(14L)).thenReturn(null);
 
         judgeService.judge(14L);
 
-        verify(languageExecutor, never()).supports(any());
-        verify(languageExecutor, never()).execute(any(JudgeContext.class));
+        verify(executionGateway, never()).supports(any());
+        verify(executionGateway, never()).execute(any(JudgeContext.class));
         verify(judgePersistenceService, never()).saveResultsAndFinish(any(), any(), any());
     }
 
@@ -152,12 +151,12 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(15L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("cpp")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class)))
+        when(executionGateway.supports("cpp")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
                 .thenReturn(JudgeExecutionResult.timeout(1000));
 
         judgeService.judge(15L);
@@ -186,17 +185,17 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(16L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("unknown")).thenReturn(false);
+        when(executionGateway.supports("unknown")).thenReturn(false);
 
         judgeService.judge(16L);
 
         ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
         ArgumentCaptor<Instant> finishedAtCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(languageExecutor, never()).execute(any(JudgeContext.class));
+        verify(executionGateway, never()).execute(any(JudgeContext.class));
         verify(judgePersistenceService).saveResultsAndFinish(eq(16L), runResultCaptor.capture(), finishedAtCaptor.capture());
 
         JudgeRunResult runResult = runResultCaptor.getValue();
@@ -215,12 +214,12 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(17L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("python")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class)))
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
                 .thenReturn(new JudgeExecutionResult(true, "OK\n", "", 0, 2400, 64, false, false));
 
         judgeService.judge(17L);
@@ -253,19 +252,19 @@ class JudgeServiceTest {
 
         JudgeService judgeService = new JudgeService(
                 judgePersistenceService,
-                List.of(languageExecutor)
+                executionGateway
         );
 
         when(judgePersistenceService.startJudging(18L)).thenReturn(startedJudging);
-        when(languageExecutor.supports("python")).thenReturn(true);
-        when(languageExecutor.execute(any(JudgeContext.class)))
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
                 .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 3, 32, false, false))
                 .thenReturn(new JudgeExecutionResult(true, "wrong\n", "", 0, 4, 32, false, false));
 
         judgeService.judge(18L);
 
         ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
-        verify(languageExecutor, times(2)).execute(any(JudgeContext.class));
+        verify(executionGateway, times(2)).execute(any(JudgeContext.class));
         verify(judgePersistenceService).saveResultsAndFinish(eq(18L), runResultCaptor.capture(), any(Instant.class));
 
         JudgeRunResult runResult = runResultCaptor.getValue();
