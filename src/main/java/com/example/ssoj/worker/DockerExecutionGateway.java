@@ -1,10 +1,12 @@
 package com.example.ssoj.worker;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
+@ConditionalOnProperty(name = "judge.execution.mode", havingValue = "docker", matchIfMissing = true)
 public class DockerExecutionGateway implements ExecutionGateway {
 
     private final List<LanguageExecutor> languageExecutors;

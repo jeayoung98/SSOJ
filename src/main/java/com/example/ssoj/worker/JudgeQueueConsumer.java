@@ -16,39 +16,44 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 
 @ConditionalOnProperty(name = "worker.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "worker.mode", havingValue = "redis-polling", matchIfMissing = true)
 @Component
 public class JudgeQueueConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(JudgeQueueConsumer.class);
-    private static final String QUEUE_KEY = "judge:queue";
 
     private final StringRedisTemplate redisTemplate;
     private final JudgeService judgeService;
     private final ExecutorService executorService;
     private final Semaphore semaphore;
+    private final String queueKey;
 
     @Autowired
     public JudgeQueueConsumer(
             StringRedisTemplate redisTemplate,
             JudgeService judgeService,
-            @Value("${worker.max-concurrency:2}") int maxConcurrency
+            @Value("${worker.max-concurrency:2}") int maxConcurrency,
+            @Value("${judge.dispatch.redis.queue-key:judge:queue}") String queueKey
     ) {
         this.redisTemplate = redisTemplate;
         this.judgeService = judgeService;
         this.executorService = Executors.newFixedThreadPool(maxConcurrency);
         this.semaphore = new Semaphore(maxConcurrency);
+        this.queueKey = queueKey;
     }
 
     JudgeQueueConsumer(
             StringRedisTemplate redisTemplate,
             JudgeService judgeService,
             ExecutorService executorService,
-            Semaphore semaphore
+            Semaphore semaphore,
+            String queueKey
     ) {
         this.redisTemplate = redisTemplate;
         this.judgeService = judgeService;
         this.executorService = executorService;
         this.semaphore = semaphore;
+        this.queueKey = queueKey;
     }
 
     @Scheduled(fixedDelayString = "${worker.poll-delay-ms:1000}")
@@ -59,10 +64,10 @@ public class JudgeQueueConsumer {
 
         String value;
         try {
-            value = redisTemplate.opsForList().leftPop(QUEUE_KEY);
+            value = redisTemplate.opsForList().leftPop(queueKey);
         } catch (RedisConnectionFailureException exception) {
             semaphore.release();
-            log.warn("Failed to connect to Redis while reading queue {}", QUEUE_KEY, exception);
+            log.warn("Failed to connect to Redis while reading queue {}", queueKey, exception);
             return;
         }
 
@@ -73,7 +78,7 @@ public class JudgeQueueConsumer {
 
         try {
             Long submissionId = Long.parseLong(value);
-            log.info("Received submissionId={} from Redis queue {}", submissionId, QUEUE_KEY);
+            log.info("Received submissionId={} from Redis queue {}", submissionId, queueKey);
             executorService.submit(() -> {
                 try {
                     judgeService.judge(submissionId);
