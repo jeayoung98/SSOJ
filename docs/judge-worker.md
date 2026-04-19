@@ -113,6 +113,18 @@ redis-cli LPUSH judge:queue 123
 - 예외 처리:
   - executor 예외 또는 지원하지 않는 언어는 `SYSTEM_ERROR`
 
+## 관련 문서
+
+- 구조 구분: [현재 아키텍처 vs 검토 중 아키텍처](./current-vs-target-architecture.md)
+- 구조 검토: [Cloud Run 기반 채점 구조 검토](./cloud-run-architecture-review.md)
+- 서비스 개선: [JudgeService 개선 정리](./judge-service-improvements.md)
+- E2E 확인: [Judge Worker E2E 시나리오](./judge-worker-e2e.md)
+- 수동 점검: [Judge Worker 검증 체크리스트](./worker-validation-checklist.md)
+- 연동 점검: [Next.js와 Spring Worker 연동 체크리스트](./nextjs-spring-worker-checklist.md)
+- 동시성 점검: [Judge Worker 동시성 점검](./judge-worker-concurrency-check.md)
+- cleanup 점검: [Judge Worker Cleanup 점검](./judge-worker-cleanup-check.md)
+- 발표용 요약: [Judge Worker 데모 스크립트](./judge-worker-demo-script.md)
+
 ## 현재 문서가 다루지 않는 범위
 
 - 운영 배포 구조
