@@ -115,6 +115,7 @@ redis-cli LPUSH judge:queue 123
 
 ## 관련 문서
 
+- 모드 설정: [Judge Worker 모드 설정](./worker-mode-configuration.md)
 - 구조 구분: [현재 아키텍처 vs 검토 중 아키텍처](./current-vs-target-architecture.md)
 - 구조 검토: [Cloud Run 기반 채점 구조 검토](./cloud-run-architecture-review.md)
 - 서비스 개선: [JudgeService 개선 정리](./judge-service-improvements.md)

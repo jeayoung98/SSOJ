@@ -246,11 +246,57 @@ redis-cli LPUSH judge:queue 123
 docker compose up --build
 ```
 
+## 모드 설정
+
+현재 worker는 local 경로와 remote 경로를 설정으로 구분할 수 있습니다.
+
+설정 역할:
+
+- `worker.mode`
+  - judge 실행 진입점을 결정합니다.
+  - `redis-polling`: `JudgeQueueConsumer` 사용
+  - `http-trigger`: `JudgeExecutionController` 사용
+- `judge.dispatch.mode`
+  - `submissionId`를 worker 쪽으로 전달하는 dispatch 구현을 결정합니다.
+  - `redis`: Redis queue 사용
+  - `cloud-tasks`: 운영 경로용 확장 포인트
+- `judge.execution.mode`
+  - 실제 코드 실행 방식을 결정합니다.
+  - `docker`: 로컬 Docker executor 사용
+  - `remote`: HTTP 기반 remote runner 사용
+
+- local 조합
+  - `worker.mode=redis-polling`
+  - `judge.dispatch.mode=redis`
+  - `judge.execution.mode=docker`
+- remote 조합
+  - `worker.mode=http-trigger`
+  - `judge.dispatch.mode=cloud-tasks`
+  - `judge.execution.mode=remote`
+
+예시 프로필 파일:
+
+- `src/main/resources/application-local.properties`
+- `src/main/resources/application-remote.properties`
+
+현재 코드 기준 동작은 아래와 같습니다.
+
+- local 모드
+  - Redis polling consumer 활성화
+  - Docker execution 경로 사용
+- remote 모드
+  - Redis polling consumer 비활성화
+  - 내부 HTTP trigger + remote execution 경로 사용
+  - Cloud Tasks dispatch는 구현 선택 구조만 준비되어 있고 실제 호출은 아직 미구현
+
+상세 설명은 [Judge Worker 모드 설정](./docs/worker-mode-configuration.md)을 참고하면 됩니다.
+
 ## 관련 문서
 
 상세 문서는 `docs/` 아래에 정리되어 있습니다.
 
 - [Judge Worker 문서](./docs/judge-worker.md)
+- [Judge Worker 모드 설정](./docs/worker-mode-configuration.md)
 - [현재 아키텍처 vs 검토 중 아키텍처](./docs/current-vs-target-architecture.md)
 - [Cloud Run 기반 채점 구조 검토](./docs/cloud-run-architecture-review.md)
 - [JudgeService 개선 정리](./docs/judge-service-improvements.md)
