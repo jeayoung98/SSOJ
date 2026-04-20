@@ -1,29 +1,29 @@
-# Cloud Run Orchestrator
+# Cloud Run 오케스트레이터
 
-This service can run on Cloud Run as the orchestrator role.
+이 서비스는 Cloud Run에서 오케스트레이터 역할로 실행될 수 있습니다.
 
-Remote orchestrator mode is the following fixed combination:
+원격 오케스트레이터 모드는 다음과 같은 고정 조합입니다.
 
 - `worker.role=orchestrator`
 - `worker.mode=http-trigger`
 - `judge.dispatch.mode=cloud-tasks`
 - `judge.execution.mode=remote`
 
-Why Redis polling is off:
+Redis 폴링이 꺼져 있는 이유:
 
-- `JudgeQueueConsumer` is only created when `worker.mode=redis-polling`.
-- Remote orchestrator uses `worker.mode=http-trigger`, so Redis polling never starts on Cloud Run.
-- The Redis startup check is also skipped because it only runs when `judge.dispatch.mode=redis`.
+- `JudgeQueueConsumer`는 `worker.mode=redis-polling`일 때만 생성됩니다.
+- 원격 오케스트레이터는 `worker.mode=http-trigger`를 사용하므로 Cloud Run에서 Redis 폴링이 시작되지 않습니다.
+- Redis 시작 체크도 `judge.dispatch.mode=redis`일 때만 실행되므로 함께 건너뜁니다.
 
-## Required environment variables
+## 필수 환경 변수
 
-Database:
+데이터베이스:
 
 - `SPRING_DATASOURCE_URL`
 - `SPRING_DATASOURCE_USERNAME`
 - `SPRING_DATASOURCE_PASSWORD`
 
-Remote runner:
+원격 러너:
 
 - `JUDGE_EXECUTION_REMOTE_BASE_URL`
 
@@ -34,35 +34,35 @@ Cloud Tasks:
 - `JUDGE_DISPATCH_CLOUD_TASKS_QUEUE_NAME`
 - `JUDGE_DISPATCH_CLOUD_TASKS_TARGET_URL`
 
-Optional Cloud Tasks auth:
+선택적 Cloud Tasks 인증:
 
 - `JUDGE_DISPATCH_CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL`
 - `JUDGE_DISPATCH_CLOUD_TASKS_OIDC_AUDIENCE`
 
-Runtime:
+런타임:
 
 - `SPRING_PROFILES_ACTIVE=remote`
 - `PORT`
 
 ## Dockerfile
 
-The existing [Dockerfile](/C:/Users/user/OneDrive/Desktop/JeaYoung/프로젝트/SSOJ/SSOJ/Dockerfile) already works for Cloud Run:
+기존 [Dockerfile](/C:/Users/user/OneDrive/Desktop/JeaYoung/프로젝트/SSOJ/SSOJ/Dockerfile)은 이미 Cloud Run에서 동작 가능한 형태입니다.
 
-- builds the Spring Boot jar
-- exposes `8080`
-- starts `java -jar /app/app.jar`
+- Spring Boot jar를 빌드합니다.
+- `8080` 포트를 노출합니다.
+- `java -jar /app/app.jar`로 애플리케이션을 시작합니다.
 
-The app reads Cloud Run's `PORT` through `server.port=${PORT:8080}`.
+애플리케이션은 `server.port=${PORT:8080}` 설정을 통해 Cloud Run의 `PORT` 값을 읽습니다.
 
-## Deploy flow
+## 배포 흐름
 
-1. Build and push the image.
+1. 이미지를 빌드하고 푸시합니다.
 
 ```powershell
 gcloud builds submit --tag asia-northeast3-docker.pkg.dev/PROJECT_ID/REPO/ssoj-orchestrator
 ```
 
-2. Deploy the Cloud Run service.
+2. Cloud Run 서비스를 배포합니다.
 
 ```powershell
 gcloud run deploy ssoj-orchestrator ^
@@ -83,23 +83,23 @@ gcloud run deploy ssoj-orchestrator ^
   --set-env-vars JUDGE_DISPATCH_CLOUD_TASKS_OIDC_AUDIENCE=https://ORCHESTRATOR_URL
 ```
 
-3. Grant the Cloud Tasks caller service account permission to invoke the orchestrator Cloud Run service.
+3. Cloud Tasks 호출용 서비스 계정에 오케스트레이터 Cloud Run 서비스를 호출할 권한을 부여합니다.
 
-## Health and internal endpoints
+## 헬스 체크 및 내부 엔드포인트
 
-Health checks:
+헬스 체크:
 
 - liveness: `/actuator/health/liveness`
 - readiness: `/actuator/health/readiness`
-- basic health: `/actuator/health`
+- 기본 헬스 체크: `/actuator/health`
 
-Internal endpoints:
+내부 엔드포인트:
 
-- `/internal/judge-executions`: orchestrator internal async trigger entrypoint
-- `/internal/runner-executions`: runner internal execution entrypoint, not served by orchestrator role
+- `/internal/judge-executions`: 오케스트레이터 내부 비동기 트리거 진입점
+- `/internal/runner-executions`: 러너 내부 실행 진입점이며, 오케스트레이터 역할에서는 제공되지 않음
 
-Security notes:
+보안 메모:
 
-- Cloud Run orchestrator should not allow public access to `/internal/judge-executions`.
-- Cloud Tasks should call it with an OIDC token using a dedicated service account.
-- The runner base URL should point to a runner service that is also restricted to internal or authenticated calls.
+- Cloud Run 오케스트레이터는 `/internal/judge-executions`에 대한 공개 접근을 허용하면 안 됩니다.
+- Cloud Tasks는 전용 서비스 계정의 OIDC 토큰을 사용해 이 엔드포인트를 호출해야 합니다.
+- 러너 기본 URL은 내부 호출 또는 인증된 호출만 허용하는 러너 서비스를 가리켜야 합니다.
