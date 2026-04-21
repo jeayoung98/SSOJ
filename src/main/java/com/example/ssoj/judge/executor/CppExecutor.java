@@ -47,8 +47,19 @@ public class CppExecutor implements LanguageExecutor {
     public JudgeExecutionResult execute(JudgeContext context) {
         Path tempDirectory = null;
         try {
+            if (context.sourceCode() == null) {
+                log.warn(
+                        "C++ sourceCode is null for submission {} language={}",
+                        context.submissionId(),
+                        context.language()
+                );
+                return JudgeExecutionResult.systemError("sourceCode must not be null");
+            }
+
             tempDirectory = workspaceDirectoryFactory.create("judge-cpp-");
-            Files.writeString(tempDirectory.resolve(SOURCE_FILE_NAME), context.sourceCode(), StandardCharsets.UTF_8);
+            Path sourceFile = tempDirectory.resolve(SOURCE_FILE_NAME);
+            Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
+            logSourceFileState(context, tempDirectory, sourceFile);
             log.info(
                     "Executing C++ submission {} with image={}, compileCommand={}, runCommand={}",
                     context.submissionId(),
@@ -74,6 +85,18 @@ public class CppExecutor implements LanguageExecutor {
 
     private String buildContainerCommand() {
         return compileCommand + " && " + runCommand;
+    }
+
+    private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
+        log.info(
+                "Prepared C++ workspace for submission {} language={} workspaceDirectory={} sourceFile={} sourceExists={} sourceSizeBytes={}",
+                context.submissionId(),
+                context.language(),
+                workspaceDirectory.toAbsolutePath(),
+                sourceFile.toAbsolutePath(),
+                Files.exists(sourceFile),
+                Files.size(sourceFile)
+        );
     }
 
     private void deleteDirectory(Path directory) {

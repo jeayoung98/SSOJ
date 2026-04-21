@@ -41,8 +41,19 @@ public class PythonExecutor implements LanguageExecutor {
     public JudgeExecutionResult execute(JudgeContext context) {
         Path tempDirectory = null;
         try {
+            if (context.sourceCode() == null) {
+                log.warn(
+                        "Python sourceCode is null for submission {} language={}",
+                        context.submissionId(),
+                        context.language()
+                );
+                return JudgeExecutionResult.systemError("sourceCode must not be null");
+            }
+
             tempDirectory = workspaceDirectoryFactory.create("judge-python-");
-            Files.writeString(tempDirectory.resolve(SOURCE_FILE_NAME), context.sourceCode(), StandardCharsets.UTF_8);
+            Path sourceFile = tempDirectory.resolve(SOURCE_FILE_NAME);
+            Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
+            logSourceFileState(context, tempDirectory, sourceFile);
 
             return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, "python3 main.py");
         } catch (IOException exception) {
@@ -58,6 +69,18 @@ public class PythonExecutor implements LanguageExecutor {
         } finally {
             deleteDirectory(tempDirectory);
         }
+    }
+
+    private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
+        log.info(
+                "Prepared Python workspace for submission {} language={} workspaceDirectory={} sourceFile={} sourceExists={} sourceSizeBytes={}",
+                context.submissionId(),
+                context.language(),
+                workspaceDirectory.toAbsolutePath(),
+                sourceFile.toAbsolutePath(),
+                Files.exists(sourceFile),
+                Files.size(sourceFile)
+        );
     }
 
     private void deleteDirectory(Path directory) {
