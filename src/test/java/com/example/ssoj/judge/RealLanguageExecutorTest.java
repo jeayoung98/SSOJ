@@ -10,6 +10,8 @@ import com.example.ssoj.judge.executor.WorkspaceDirectoryFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfSystemProperty(named = "run.real.executor.tests", matches = "true")
@@ -33,8 +35,8 @@ class RealLanguageExecutorTest {
         );
 
         JudgeExecutionResult result = cppExecutor.execute(new JudgeContext(
-                1001L,
-                2001L,
+                UUID.fromString("00000000-0000-0000-0000-000000001001"),
+                "2001",
                 "cpp",
                 """
                 #include <chrono>
@@ -66,8 +68,8 @@ class RealLanguageExecutorTest {
         JavaExecutor javaExecutor = new JavaExecutor("eclipse-temurin:17-jdk", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeExecutionResult result = javaExecutor.execute(new JudgeContext(
-                1002L,
-                2002L,
+                UUID.fromString("00000000-0000-0000-0000-000000001002"),
+                "2002",
                 "java",
                 """
                 import java.io.BufferedReader;
@@ -100,8 +102,8 @@ class RealLanguageExecutorTest {
         PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeExecutionResult result = pythonExecutor.execute(new JudgeContext(
-                1003L,
-                2003L,
+                UUID.fromString("00000000-0000-0000-0000-000000001003"),
+                "2003",
                 "python",
                 """
                 import time

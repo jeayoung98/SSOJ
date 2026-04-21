@@ -8,6 +8,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,8 +23,8 @@ class DockerProcessExecutorTest {
 
         try {
             JudgeContext context = new JudgeContext(
-                    100L,
-                    200L,
+                    UUID.fromString("00000000-0000-0000-0000-000000000100"),
+                    "200",
                     "cpp",
                     "",
                     "",

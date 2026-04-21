@@ -1,11 +1,14 @@
 package com.example.ssoj.judge.domain.model;
 
-import com.example.ssoj.submission.domain.SubmissionStatus;
+import com.example.ssoj.submission.domain.SubmissionResult;
+
+import java.util.UUID;
 
 public record CaseJudgeResult(
-        Long testCaseId,
-        SubmissionStatus status,
+        UUID testCaseId,
+        SubmissionResult result,
         Integer executionTimeMs,
-        Integer memoryUsageKb
+        Integer memoryKb,
+        String errorMessage
 ) {
 }

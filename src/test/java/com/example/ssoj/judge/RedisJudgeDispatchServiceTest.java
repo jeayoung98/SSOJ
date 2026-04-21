@@ -9,11 +9,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import java.util.UUID;
+
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class RedisJudgeDispatchServiceTest {
+
+    private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000123");
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -27,8 +31,8 @@ class RedisJudgeDispatchServiceTest {
 
         when(redisTemplate.opsForList()).thenReturn(listOperations);
 
-        dispatchService.dispatch(new JudgeDispatchCommand(123L, "req-1"));
+        dispatchService.dispatch(new JudgeDispatchCommand(SUBMISSION_ID, "req-1"));
 
-        verify(listOperations).leftPush("judge:queue", "123");
+        verify(listOperations).leftPush("judge:queue", SUBMISSION_ID.toString());
     }
 }

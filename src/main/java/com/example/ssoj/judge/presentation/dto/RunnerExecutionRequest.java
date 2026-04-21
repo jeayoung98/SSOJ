@@ -2,9 +2,11 @@ package com.example.ssoj.judge.presentation.dto;
 
 import com.example.ssoj.judge.domain.model.JudgeContext;
 
+import java.util.UUID;
+
 public record RunnerExecutionRequest(
-        Long submissionId,
-        Long problemId,
+        UUID submissionId,
+        String problemId,
         String language,
         String sourceCode,
         String input,

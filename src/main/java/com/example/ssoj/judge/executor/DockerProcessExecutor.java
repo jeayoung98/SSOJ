@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -108,7 +109,7 @@ public class DockerProcessExecutor {
         }
     }
 
-    private void cleanupContainer(Long submissionId, Path cidFile) {
+    private void cleanupContainer(UUID submissionId, Path cidFile) {
         if (!Files.exists(cidFile)) {
             return;
         }

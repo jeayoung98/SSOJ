@@ -3,12 +3,15 @@ package com.example.ssoj.judge;
 import com.example.ssoj.problem.domain.Problem;
 import com.example.ssoj.problem.infrastructure.ProblemRepository;
 import com.example.ssoj.submission.domain.Submission;
-import com.example.ssoj.submission.domain.SubmissionCaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionCaseResultRepository;
+import com.example.ssoj.submission.domain.SubmissionResult;
+import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
+import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.submission.domain.SubmissionStatus;
-import com.example.ssoj.testcase.domain.TestCase;
-import com.example.ssoj.testcase.infrastructure.TestCaseRepository;
+import com.example.ssoj.testcase.domain.ProblemTestcase;
+import com.example.ssoj.testcase.infrastructure.ProblemTestcaseRepository;
+import com.example.ssoj.user.domain.User;
+import com.example.ssoj.user.infrastructure.UserRepository;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -34,6 +37,7 @@ import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.datasource.url=jdbc:h2:mem:orchestrator-remote-runner;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
+                "spring.datasource.url=jdbc:h2:mem:orchestrator-remote-runner;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;INIT=RUNSCRIPT FROM 'classpath:/h2-init.sql'",
                 "spring.datasource.driver-class-name=org.h2.Driver",
                 "spring.datasource.username=sa",
                 "spring.datasource.password=",
@@ -66,13 +70,16 @@ class OrchestratorRemoteRunnerIntegrationTest {
     private ProblemRepository problemRepository;
 
     @Autowired
-    private TestCaseRepository testCaseRepository;
+    private ProblemTestcaseRepository testCaseRepository;
 
     @Autowired
     private SubmissionRepository submissionRepository;
 
     @Autowired
-    private SubmissionCaseResultRepository submissionCaseResultRepository;
+    private UserRepository userRepository;
+
+    @Autowired
+    private SubmissionTestcaseResultRepository submissionCaseResultRepository;
 
     @DynamicPropertySource
     static void remoteRunnerProperties(DynamicPropertyRegistry registry) throws IOException {
@@ -93,6 +100,7 @@ class OrchestratorRemoteRunnerIntegrationTest {
         RECEIVED_REQUESTS.clear();
         submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
+        userRepository.deleteAll();
         testCaseRepository.deleteAll();
         problemRepository.deleteAll();
     }
@@ -100,32 +108,33 @@ class OrchestratorRemoteRunnerIntegrationTest {
     @Test
     void judgeExecutionController_runsRemoteRunnerForEachHiddenCase_andPersistsFinalResult() {
         Problem problem = problemRepository.save(problem(1000, 128));
+        User user = userRepository.save(user());
         testCaseRepository.save(testCase(problem, "1 2\n", "3\n", true));
         testCaseRepository.save(testCase(problem, "2 3\n", "5\n", true));
 
-        Submission submission = submissionRepository.save(submission(problem, "python", "print(sum(map(int, input().split())))"));
+        Submission submission = submissionRepository.save(submission(user, problem, "python", "print(sum(map(int, input().split())))"));
         HttpHeaders headers = new HttpHeaders();
         headers.add("Content-Type", "application/json");
         ResponseEntity<Void> response = new RestTemplate().postForEntity(
                 "http://localhost:" + orchestratorPort + "/internal/judge-executions",
-                new HttpEntity<>("{\"submissionId\":" + submission.getId() + "}", headers),
+                new HttpEntity<>("{\"submissionId\":\"" + submission.getId() + "\"}", headers),
                 Void.class
         );
 
         Submission finishedSubmission = submissionRepository.findById(submission.getId()).orElseThrow();
-        List<SubmissionCaseResult> caseResults = submissionCaseResultRepository.findAll().stream()
+        List<SubmissionTestcaseResult> caseResults = submissionCaseResultRepository.findAll().stream()
                 .filter(result -> result.getSubmission().getId().equals(submission.getId()))
-                .sorted(Comparator.comparing(SubmissionCaseResult::getId))
+                .sorted(Comparator.comparing(SubmissionTestcaseResult::getId))
                 .toList();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.AC);
-        assertThat(finishedSubmission.getStartedAt()).isNotNull();
-        assertThat(finishedSubmission.getFinishedAt()).isNotNull();
+        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
+        assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(caseResults).hasSize(2);
         assertThat(caseResults)
-                .extracting(SubmissionCaseResult::getStatus)
-                .containsExactly(SubmissionStatus.AC, SubmissionStatus.AC);
+                .extracting(SubmissionTestcaseResult::getResult)
+                .containsExactly(SubmissionResult.AC, SubmissionResult.AC);
         assertThat(RECEIVED_REQUESTS).hasSize(2);
         assertThat(RECEIVED_REQUESTS)
                 .extracting(RunnerExecutionRequest::input)
@@ -154,8 +163,8 @@ class OrchestratorRemoteRunnerIntegrationTest {
 
             String requestBody = new String(exchange.getRequestBody().readAllBytes());
             RunnerExecutionRequest request = new RunnerExecutionRequest(
-                    longField(requestBody, "submissionId"),
-                    longField(requestBody, "problemId"),
+                    uuidField(requestBody, "submissionId"),
+                    stringField(requestBody, "problemId"),
                     stringField(requestBody, "language"),
                     stringField(requestBody, "sourceCode"),
                     stringField(requestBody, "input"),
@@ -198,8 +207,8 @@ class OrchestratorRemoteRunnerIntegrationTest {
         return total;
     }
 
-    private static Long longField(String json, String fieldName) {
-        return Long.parseLong(numberToken(json, fieldName));
+    private static UUID uuidField(String json, String fieldName) {
+        return UUID.fromString(stringField(json, fieldName));
     }
 
     private static Integer intField(String json, String fieldName) {
@@ -257,29 +266,41 @@ class OrchestratorRemoteRunnerIntegrationTest {
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {
         Problem problem = instantiate(Problem.class);
+        ReflectionTestUtils.setField(problem, "id", UUID.randomUUID().toString());
         ReflectionTestUtils.setField(problem, "title", "A + B");
+        ReflectionTestUtils.setField(problem, "difficulty", "EASY");
         ReflectionTestUtils.setField(problem, "description", "sum two numbers");
         ReflectionTestUtils.setField(problem, "timeLimitMs", timeLimitMs);
         ReflectionTestUtils.setField(problem, "memoryLimitMb", memoryLimitMb);
         return problem;
     }
 
-    private static TestCase testCase(Problem problem, String input, String output, boolean hidden) {
-        TestCase testCase = instantiate(TestCase.class);
+    private static User user() {
+        User user = instantiate(User.class);
+        ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(user, "nickname", "tester");
+        ReflectionTestUtils.setField(user, "role", "USER");
+        return user;
+    }
+
+    private static ProblemTestcase testCase(Problem problem, String input, String output, boolean hidden) {
+        ProblemTestcase testCase = instantiate(ProblemTestcase.class);
         ReflectionTestUtils.setField(testCase, "problem", problem);
-        ReflectionTestUtils.setField(testCase, "input", input);
-        ReflectionTestUtils.setField(testCase, "output", output);
+        ReflectionTestUtils.setField(testCase, "testcaseOrder", 1);
+        ReflectionTestUtils.setField(testCase, "inputText", input);
+        ReflectionTestUtils.setField(testCase, "expectedOutput", output);
         ReflectionTestUtils.setField(testCase, "hidden", hidden);
         return testCase;
     }
 
-    private static Submission submission(Problem problem, String language, String sourceCode) {
+    private static Submission submission(User user, Problem problem, String language, String sourceCode) {
         Submission submission = instantiate(Submission.class);
+        ReflectionTestUtils.setField(submission, "user", user);
         ReflectionTestUtils.setField(submission, "problem", problem);
         ReflectionTestUtils.setField(submission, "language", language);
         ReflectionTestUtils.setField(submission, "sourceCode", sourceCode);
         ReflectionTestUtils.setField(submission, "status", SubmissionStatus.PENDING);
-        ReflectionTestUtils.setField(submission, "createdAt", Instant.now());
+        ReflectionTestUtils.setField(submission, "submittedAt", Instant.now());
         return submission;
     }
 

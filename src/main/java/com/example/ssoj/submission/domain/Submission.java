@@ -1,6 +1,7 @@
 package com.example.ssoj.submission.domain;
 
 import com.example.ssoj.problem.domain.Problem;
+import com.example.ssoj.user.domain.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -15,15 +16,21 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Getter
 @Entity
-@Table(name = "submission")
+@Table(name = "submissions")
 public class Submission {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(nullable = false)
+    private UUID id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "problem_id", nullable = false)
@@ -36,40 +43,46 @@ public class Submission {
     private String sourceCode;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "submission_status")
     private SubmissionStatus status;
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "submission_result")
+    private SubmissionResult result;
 
-    @Column(name = "started_at")
-    private Instant startedAt;
+    @Column(name = "execution_time_ms")
+    private Integer executionTimeMs;
 
-    @Column(name = "finished_at")
-    private Instant finishedAt;
+    @Column(name = "memory_kb")
+    private Integer memoryKb;
+
+    @Column(name = "submitted_at", nullable = false)
+    private Instant submittedAt;
+
+    @Column(name = "judged_at")
+    private Instant judgedAt;
 
     protected Submission() {
     }
 
     public boolean isCompleted() {
-        return switch (status) {
-            case AC, WA, CE, RE, TLE, MLE, SYSTEM_ERROR -> true;
-            default -> false;
-        };
+        return result != null;
     }
 
-    public boolean markAsJudging(Instant startedAt) {
+    public boolean markAsJudging() {
         if (status != SubmissionStatus.PENDING) {
             return false;
         }
 
         this.status = SubmissionStatus.JUDGING;
-        this.startedAt = startedAt;
         return true;
     }
 
-    public void finish(SubmissionStatus status, Instant finishedAt) {
-        this.status = status;
-        this.finishedAt = finishedAt;
+    public void finish(SubmissionResult result, Integer executionTimeMs, Integer memoryKb, Instant judgedAt) {
+        this.status = SubmissionStatus.DONE;
+        this.result = result;
+        this.executionTimeMs = executionTimeMs;
+        this.memoryKb = memoryKb;
+        this.judgedAt = judgedAt;
     }
 }

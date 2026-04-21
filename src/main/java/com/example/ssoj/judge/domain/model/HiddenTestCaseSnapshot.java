@@ -1,7 +1,9 @@
 package com.example.ssoj.judge.domain.model;
 
+import java.util.UUID;
+
 public record HiddenTestCaseSnapshot(
-        Long testCaseId,
+        UUID testCaseId,
         String input,
         String expectedOutput
 ) {

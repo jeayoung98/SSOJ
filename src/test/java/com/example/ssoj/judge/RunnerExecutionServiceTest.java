@@ -11,10 +11,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(MockitoExtension.class)
 class RunnerExecutionServiceTest {
+
+    private static final UUID SUBMISSION_10 = UUID.fromString("00000000-0000-0000-0000-000000000010");
+    private static final UUID SUBMISSION_11 = UUID.fromString("00000000-0000-0000-0000-000000000011");
 
     @Test
     void execute_usesMatchingLanguageExecutorAndMapsResponse() {
@@ -27,8 +32,8 @@ class RunnerExecutionServiceTest {
         );
 
         RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                10L,
-                20L,
+                SUBMISSION_10,
+                "20",
                 "python",
                 "print(42)",
                 "",
@@ -39,7 +44,7 @@ class RunnerExecutionServiceTest {
         assertThat(response.success()).isTrue();
         assertThat(response.stdout()).isEqualTo("42\n");
         assertThat(response.systemError()).isFalse();
-        assertThat(executor.lastContext()).isEqualTo(new JudgeContext(10L, 20L, "python", "print(42)", "", 1000, 128));
+        assertThat(executor.lastContext()).isEqualTo(new JudgeContext(SUBMISSION_10, "20", "python", "print(42)", "", 1000, 128));
     }
 
     @Test
@@ -49,8 +54,8 @@ class RunnerExecutionServiceTest {
         );
 
         RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                10L,
-                20L,
+                SUBMISSION_10,
+                "20",
                 "ruby",
                 "puts 1",
                 "",
@@ -69,8 +74,8 @@ class RunnerExecutionServiceTest {
         );
 
         RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                11L,
-                21L,
+                SUBMISSION_11,
+                "21",
                 "cpp",
                 "int main() {}",
                 "",

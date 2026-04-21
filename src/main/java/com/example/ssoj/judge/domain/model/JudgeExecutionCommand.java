@@ -1,4 +1,6 @@
 package com.example.ssoj.judge.domain.model;
 
-public record JudgeExecutionCommand(Long submissionId) {
+import java.util.UUID;
+
+public record JudgeExecutionCommand(UUID submissionId) {
 }

@@ -9,12 +9,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class CloudTasksJudgeDispatchServiceTest {
+
+    private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000123");
 
     @Mock
     private CloudTasksGateway cloudTasksGateway;
@@ -38,11 +42,11 @@ class CloudTasksJudgeDispatchServiceTest {
                 "https://orchestrator.example/internal/judge-executions",
                 "worker@example.iam.gserviceaccount.com",
                 "https://orchestrator.example",
-                "{\"submissionId\":123}",
+                "{\"submissionId\":\"00000000-0000-0000-0000-000000000123\"}",
                 "req-1"
         )).thenReturn("projects/demo-project/locations/asia-northeast3/queues/judge-queue/tasks/task-1");
 
-        service.dispatch(new JudgeDispatchCommand(123L, "req-1"));
+        service.dispatch(new JudgeDispatchCommand(SUBMISSION_ID, "req-1"));
 
         verify(cloudTasksGateway).createHttpTask(
                 "demo-project",
@@ -51,7 +55,7 @@ class CloudTasksJudgeDispatchServiceTest {
                 "https://orchestrator.example/internal/judge-executions",
                 "worker@example.iam.gserviceaccount.com",
                 "https://orchestrator.example",
-                "{\"submissionId\":123}",
+                "{\"submissionId\":\"00000000-0000-0000-0000-000000000123\"}",
                 "req-1"
         );
     }
@@ -68,7 +72,7 @@ class CloudTasksJudgeDispatchServiceTest {
         );
         CloudTasksJudgeDispatchService service = new CloudTasksJudgeDispatchService(cloudTasksGateway, properties);
 
-        assertThatThrownBy(() -> service.dispatch(JudgeDispatchCommand.fromSubmissionId(123L)))
+        assertThatThrownBy(() -> service.dispatch(JudgeDispatchCommand.fromSubmissionId(SUBMISSION_ID)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Missing required property: judge.dispatch.cloud-tasks.project-id");
     }
