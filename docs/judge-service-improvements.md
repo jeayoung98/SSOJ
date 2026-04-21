@@ -1,116 +1,91 @@
-# JudgeService 개선 정리
+# JudgeService 개선 반영 현황
 
-이 문서는 현재 코드 기준으로 `JudgeService` 개선 내용을 짧게 정리한 메모입니다. 로컬 개발/검증용 worker 흐름을 기준으로 작성했으며, 운영 환경 적용 전에는 추가 검토가 필요합니다.
+이 문서는 `JudgeService` 주변 구조에서 현재 코드에 반영된 개선 사항을 정리한다. 과거 개선 메모가 아니라 현재 동작 기준의 설명 문서다.
 
-## 왜 바꿨는가
+## 1. 현재 책임 분리
 
-기존 구조는 hidden test case를 끝까지 실행하는 전제를 깔고 있었습니다. 하지만 온라인 저지 관점에서는 첫 실패가 나온 시점에 최종 결과가 이미 결정되는 경우가 많아서, 뒤 케이스를 계속 실행하는 비용 대비 이점이 작았습니다.
+`JudgeService`는 채점 흐름을 조율한다.
 
-또한 채점 시작부터 실제 코드 실행, 결과 저장까지 하나의 넓은 흐름으로 묶여 있으면 DB 트랜잭션과 커넥션 점유 시간이 길어지고, Docker 실행처럼 오래 걸릴 수 있는 작업이 DB 자원을 붙잡는 문제가 생길 수 있습니다.
+- 제출 시작 처리
+- hidden testcase 실행
+- 첫 실패 시 조기 종료
+- 결과 저장 호출
 
-## 기존 구조의 문제
+`JudgePersistenceService`는 DB 상태 변경을 담당한다.
 
-### 1. 모든 테스트케이스를 끝까지 실행
+- `PENDING -> JUDGING`
+- testcase result 저장
+- `status=DONE`
+- `result=AC/WA/...`
+- `judged_at`, 실행 시간, 메모리 저장
 
-- 첫 번째 hidden test case에서 `WA`, `RE`, `TLE`가 나와도 뒤 케이스를 계속 실행할 수 있었습니다.
-- 이미 최종 상태가 결정됐는데도 Docker 실행과 출력 비교를 계속 수행하게 됩니다.
-- 불필요한 `submission_case_result` 저장이 늘어날 수 있습니다.
+실제 코드 실행은 executor 또는 remote runner가 담당한다.
 
-### 2. 트랜잭션 범위가 너무 넓어질 위험
+## 2. 상태와 결과 분리
 
-- 시작 처리, 실제 채점, 결과 저장이 한 흐름으로 강하게 묶여 있으면 채점 시간이 긴 동안 DB 커넥션을 오래 점유하게 됩니다.
-- Docker 실행, timeout 대기, 입출력 처리 같은 비DB 작업이 트랜잭션 안에 들어오면 동시 처리 효율이 떨어집니다.
-- submission 단위 경쟁 상황에서 락 유지 시간도 길어질 수 있습니다.
+현재 구조에서는 작업 상태와 채점 결과를 분리한다.
 
-## 어떻게 바꿨는가
+- `SubmissionStatus`: `PENDING`, `JUDGING`, `DONE`
+- `SubmissionResult`: `AC`, `WA`, `CE`, `RE`, `TLE`, `MLE`, `SYSTEM_ERROR`
 
-### 1. 첫 실패 시 즉시 종료
+따라서 예전 방식처럼 `submission.status=AC`로 마감하지 않는다. 정상 채점 완료 예시는 `status=DONE`, `result=AC`다.
 
-현재 `JudgeService.runJudgeLogic(...)`는 hidden test case를 순서대로 실행하다가 첫 실패가 나오면 바로 반복을 중단합니다.
+## 3. 첫 실패 시 조기 종료
 
-- `AC`가 아닌 상태가 나오면 즉시 종료
-- 그 시점까지 실행한 case만 `JudgeRunResult.caseResults`에 포함
-- 최종 상태는 첫 실패 상태로 결정
+현재 채점 로직은 hidden testcase를 순서대로 실행하다가 `AC`가 아닌 결과가 나오면 이후 testcase 실행을 중단한다.
 
-이 방식으로 채점 결과를 바꾸지 않으면서 평균 실행 시간을 줄일 수 있습니다.
+기대 효과:
 
-### 2. 트랜잭션 경계 분리
+- 불필요한 Docker 실행 감소
+- 평균 채점 시간 감소
+- 실패 지점까지의 결과만 저장
 
-현재 구조는 역할을 아래 3단계로 나눕니다.
+## 4. transaction 경계
 
-1. 시작 처리: `JudgePersistenceService.startJudging(...)`
-2. 실제 채점: `JudgeService.runJudgeLogic(...)`
-3. 결과 저장: `JudgePersistenceService.saveResultsAndFinish(...)`
+DB 작업은 시작과 종료 저장에 집중하고, Docker 실행처럼 오래 걸릴 수 있는 작업은 DB transaction 밖에서 수행하는 방향이다.
 
-핵심은 DB 작업이 필요한 시작/종료 단계만 `@Transactional`로 묶고, 실제 Docker 채점 로직은 트랜잭션 밖에서 수행하는 점입니다.
+의도:
 
-## 트랜잭션 경계를 나눈 이유
-
-### 시작 처리 분리 이유
-
-- `submission`을 잠그고 현재 상태를 확인한 뒤 `PENDING -> JUDGING`로 바꾸는 작업은 짧고 명확하게 끝내는 편이 좋습니다.
-- 이 단계에서 채점에 필요한 snapshot만 만들어 넘기면 이후 로직은 DB 엔터티에 오래 의존하지 않아도 됩니다.
-
-### 실제 채점 분리 이유
-
-- 언어 executor 실행은 가장 오래 걸릴 수 있는 구간입니다.
-- Docker 실행, compile, run, timeout 대기를 DB 트랜잭션 밖에서 처리해야 커넥션 점유 시간이 줄어듭니다.
-- 여기서는 순수하게 "무슨 결과가 나왔는가"만 계산해서 `JudgeRunResult`로 만듭니다.
-
-### 결과 저장 분리 이유
-
-- 채점이 끝난 뒤에는 필요한 결과만 짧게 저장하고 submission을 최종 상태로 마감하면 됩니다.
-- 실패가 중간에 나더라도 `finally`에서 마감 저장을 시도할 수 있어서 `JUDGING` 방치 가능성을 줄일 수 있습니다.
-
-## Before / After 흐름 비교
-
-### Before
-
-1. submission 조회
-2. hidden test case 전체 실행
-3. 실패가 나와도 남은 케이스 계속 실행
-4. 모든 결과를 저장
-5. 마지막에 최종 상태 반영
-
-문제:
-
-- 이미 결과가 결정된 뒤에도 계속 실행
-- 불필요한 Docker 실행 증가
-- DB 자원 점유 시간이 길어질 수 있음
-
-### After
-
-1. `startJudging()`에서 submission 잠금, 상태 확인, `JUDGING` 전환, hidden test case snapshot 준비
-2. `runJudgeLogic()`에서 트랜잭션 밖으로 나와 실제 채점 수행
-3. 첫 실패가 나오면 즉시 종료
-4. `saveResultsAndFinish()`에서 실행된 case까지만 저장
-5. `finished_at`과 최종 `submission.status` 저장
-
-장점:
-
-- 실행량이 줄어듦
-- 저장 범위가 현재 정책과 일치
-- DB 작업과 채점 작업의 책임이 분리됨
-
-## 기대 효과
-
-- 평균 채점 시간 단축
-  - 첫 실패 이후 불필요한 case 실행을 제거
-- DB 커넥션 점유 시간 감소
-  - 실제 Docker 채점이 트랜잭션 밖에서 수행됨
+- DB connection 점유 시간 감소
+- long-running executor와 persistence 책임 분리
 - 동시 처리 안정성 향상
-  - 짧은 트랜잭션으로 락과 커넥션 점유를 줄여 병렬 처리에 유리
 
-## 현재 코드 기준으로 보면
+## 5. 저장 대상
 
-- `JudgeService`
-  - 실제 채점 오케스트레이션 담당
-  - 첫 실패 시 즉시 중단
-  - 예외가 나도 `finally`에서 종료 저장 호출
-- `JudgePersistenceService`
-  - 시작 처리와 종료 저장 담당
-  - `@Transactional` 범위를 짧게 유지
+`submissions`:
 
-## 한 줄 요약
+- `status`
+- `result`
+- `execution_time_ms`
+- `memory_kb`
+- `submitted_at`
+- `judged_at`
 
-이번 개선은 "끝까지 다 채점하던 구조"를 "첫 실패에서 멈추고, DB 트랜잭션은 시작/종료에만 짧게 쓰는 구조"로 바꾼 것입니다. 그 결과 평균 채점 시간, DB 자원 사용량, 동시 처리 안정성을 함께 개선할 수 있습니다.
+`submission_testcase_results`:
+
+- `submission_id`
+- `testcase_id`
+- `result`
+- `execution_time_ms`
+- `memory_kb`
+- `error_message`
+
+현재 구조에서는 `started_at`, `finished_at`, `submission_case_result`를 사용하지 않는다.
+
+## 6. 로컬과 원격 실행 차이
+
+local profile:
+
+- Redis queue consume
+- local Docker executor 직접 실행
+
+remote profile:
+
+- Cloud Tasks HTTP trigger
+- remote runner HTTP 호출
+
+runner profile:
+
+- DB 없이 단일 실행 요청 처리
+
+`JudgeService`의 핵심 판단 로직은 공통이고, 실행 방식은 설정과 port 구현체로 갈라진다.

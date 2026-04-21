@@ -1,136 +1,185 @@
-# Judge Worker 문서
+# Judge Worker 현재 동작 문서
 
-이 문서는 현재 Docker 기반 로컬 개발/검증용 worker 기준 문서입니다. 운영 최종 구조 문서가 아니며, 현재 코드 기준으로 구현 완료된 범위만 설명합니다. 운영 환경 적용 전에는 아키텍처, 보안, 배포 방식, 관측성을 다시 검토해야 합니다.
+이 문서는 현재 코드 기준의 Spring judge worker 동작을 설명한다. 운영 배포 절차가 아니라, 구현된 worker 흐름과 로컬/배포 경로의 차이를 이해하기 위한 문서다.
 
-## 문서 범위
+## 1. 현재 역할 구분
 
-- 구현 완료된 현재 Spring judge worker 기준
-- 로컬 개발과 수동 검증 기준
-- 운영 구조로는 재검토 필요
+현재 애플리케이션은 `worker.role`로 역할을 나눈다.
 
-## 현재 고정 계약
+- `orchestrator`
+  - DB에서 submission, problem, hidden testcase를 읽는다.
+  - testcase별 실행을 Docker 또는 remote runner로 수행한다.
+  - 결과를 DB에 저장한다.
+- `runner`
+  - 단일 실행 요청을 HTTP로 받는다.
+  - Docker 기반 executor로 코드를 실행한다.
+  - 실행 결과만 반환한다.
 
-- Redis queue key: `judge:queue`
-- Redis payload: `submissionId` 문자열 1개
-- 상태값:
-  - `PENDING`
-  - `JUDGING`
-  - `AC`
-  - `WA`
-  - `CE`
-  - `RE`
-  - `TLE`
-  - `MLE`
-  - `SYSTEM_ERROR`
-- 현재 실행 가능한 언어:
-  - `java`
-  - `python`
-  - `cpp`
-- 실행 방식:
-  - 각 언어 executor가 Docker 컨테이너 안에서 사용자 코드를 실행
-  - 네트워크 차단, 메모리 제한, CPU 제한, timeout 적용
-- 채점 정책:
-  - hidden test case를 id 오름차순으로 실행
-  - 첫 실패 시 즉시 중단
-  - 실행된 case까지만 `submission_case_result` 저장
-  - `started_at`, `finished_at`, 최종 `submission.status` 저장
+## 2. Queue 계약
 
-## 현재 구현됨
+로컬 Redis polling 경로:
 
-- Java executor, Python executor, C++ executor가 모두 구현되어 있음
-- Java compile error는 `stderr`에 `error:`가 포함되면 `CE`로 분류
-- timeout은 `TLE`, executor 예외는 `SYSTEM_ERROR`로 처리
-- hidden test case가 없으면 현재 구현상 `AC`로 종료
+- Redis key: `judge:queue`
+- payload: `submissionId` UUID 문자열
 
-## 추가 개선 필요
+예:
 
-- C++ compile error는 현재 Java처럼 명확한 `CE` 분류가 보장되지 않음
-- 현재 `JudgeService`의 compile error 분류 로직은 Java 전용임
-- 따라서 C++ compile error는 실제 실행 결과에 따라 `RE` 등으로 보일 수 있음
-- 언어별 stderr 분류 규칙과 세부 에러 매핑은 운영 적용 전 재설계 필요
+```powershell
+redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
+```
 
-## 필요한 로컬 환경
+`JudgeQueueConsumer`는 문자열을 `UUID.fromString(...)`으로 파싱한다. 숫자형 `123` payload는 현재 코드 기준 유효하지 않다.
 
-- JDK 17 이상
+## 3. DB 상태와 결과
+
+현재 DB 모델은 상태와 결과를 분리한다.
+
+`submissions.status`:
+
+- `PENDING`
+- `JUDGING`
+- `DONE`
+
+`submissions.result`:
+
+- `AC`
+- `WA`
+- `CE`
+- `RE`
+- `TLE`
+- `MLE`
+- `SYSTEM_ERROR`
+
+시간 필드:
+
+- 제출 시각: `submitted_at`
+- 채점 완료 시각: `judged_at`
+
+이전 문서의 `started_at`, `finished_at`은 현재 `Submission` entity에 없다.
+
+## 4. 주요 테이블
+
+현재 JPA 매핑 기준:
+
+- `users`
+- `problems`
+- `problem_examples`
+- `problem_testcases`
+- `submissions`
+- `submission_testcase_results`
+
+이전 단수형 이름인 `problem`, `test_case`, `submission`, `submission_case_result`는 현재 entity 매핑 기준이 아니다.
+
+## 5. Orchestrator 동작 흐름
+
+로컬 Redis polling 경로:
+
+```text
+Redis judge:queue
+-> JudgeQueueConsumer
+-> JudgeService.judge(UUID)
+-> JudgePersistenceService.startJudging(UUID)
+-> JudgeService.runJudgeLogic(...)
+-> ExecutionGateway
+-> JudgePersistenceService.saveResultsAndFinish(...)
+```
+
+remote HTTP trigger 경로:
+
+```text
+POST /internal/judge-executions
+-> JudgeExecutionController
+-> JudgeService.judge(UUID)
+-> RemoteExecutionGateway
+-> runner /internal/runner-executions
+-> DB 저장
+```
+
+## 6. 채점 정책
+
+- hidden testcase만 채점한다.
+- `ProblemTestcaseRepository.findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(...)`로 조회한다.
+- 첫 실패 결과가 나오면 이후 testcase 실행을 중단한다.
+- 실행한 testcase까지만 `submission_testcase_results`에 저장한다.
+- 최종 결과는 `submissions.result`에 저장하고 `submissions.status`는 `DONE`으로 바꾼다.
+
+## 7. 출력 비교
+
+현재 MVP 출력 비교 정책:
+
+- 전체 출력 `trim`
+- 줄 단위 분리
+- 각 줄 `trim`
+- line-by-line 비교
+- trailing newline 차이는 무시
+
+special judge는 구현하지 않는다.
+
+## 8. 언어 실행
+
+지원 언어:
+
+- `cpp`
+- `java`
+- `python`
+
+executor:
+
+- `CppExecutor`
+- `JavaExecutor`
+- `PythonExecutor`
+- `DockerProcessExecutor`
+
+Docker 실행 옵션은 `DockerProcessExecutor`가 구성한다.
+
+- `--network none`
+- memory limit
+- cpu limit
+- timeout
+- workspace mount
+- container/temp file cleanup
+
+## 9. 로컬 실행 기준
+
+로컬 기본 profile:
+
+```powershell
+.\gradlew.bat bootRun --args="--spring.profiles.active=local"
+```
+
+필요한 것:
+
+- JDK 17
 - PostgreSQL
 - Redis
-- Docker
+- Docker daemon
 
-기본 설정은 [application.properties](/C:/Users/user/OneDrive/Desktop/JeaYoung/프로젝트/SSOJ/SSOJ/src/main/resources/application.properties:1)에 있습니다.
-
-## 현재 로컬 기본 설정
-
-- DB:
-  - `spring.datasource.url=jdbc:postgresql://localhost:5432/ssoj`
-  - `spring.datasource.username=postgres`
-  - `spring.datasource.password=postgres`
-- Redis:
-  - `spring.data.redis.host=localhost`
-  - `spring.data.redis.port=6379`
-- Worker:
-  - `worker.poll-delay-ms=1000`
-  - `worker.max-concurrency=2`
-- Docker 이미지:
-  - `worker.executor.java.image=eclipse-temurin:17-jdk`
-  - `worker.executor.python.image=python:3.11`
-  - `worker.executor.cpp.image=gcc:13`
-
-## 로컬 실행
-
-1. PostgreSQL, Redis, Docker를 실행합니다.
-2. DB 스키마가 준비되어 있는지 확인합니다.
-3. `JAVA_HOME`을 JDK 17 이상으로 맞춥니다.
-4. worker를 실행합니다.
+`docker-compose.yml`로 PostgreSQL, Redis, judge-worker를 함께 띄울 수 있다.
 
 ```powershell
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-.\gradlew.bat bootRun
+docker compose up --build
 ```
 
-## 가장 짧은 큐 확인
+## 10. 배포 기준
 
-```powershell
-redis-cli LPUSH judge:queue 123
-```
+배포 orchestrator:
 
-정상 동작 시 worker는 Redis polling 후 `submissionId=123`을 읽고 비동기 채점을 시작합니다.
+- `SPRING_PROFILES_ACTIVE=remote`
+- `worker.mode=http-trigger`
+- `judge.dispatch.mode=cloud-tasks`
+- `judge.execution.mode=remote`
 
-## 현재 검증 포인트
+배포 runner:
 
-- queue consume:
-  - `Received submissionId=123 from Redis queue judge:queue`
-- 시작 처리:
-  - `submission.status`가 `PENDING`에서 `JUDGING`로 변경
-  - `submission.started_at` 저장
-- hidden test case 실행:
-  - hidden test case를 순서대로 실행
-  - 첫 실패 시 즉시 중단
-- 결과 저장:
-  - 실행된 test case까지만 `submission_case_result` 저장
-  - `submission.finished_at` 저장
-  - 최종 `submission.status` 저장
-- 예외 처리:
-  - executor 예외 또는 지원하지 않는 언어는 `SYSTEM_ERROR`
+- `SPRING_PROFILES_ACTIVE=runner`
+- `worker.role=runner`
+- `judge.execution.mode=docker`
 
-## 관련 문서
+주의: 현재 runner는 Docker daemon이 필요하다. 표준 Cloud Run에서 Docker 기반 실행이 가능한지는 확실하지 않으며, 현재 문서 체계에서는 Docker-capable VM 또는 별도 실행 backend를 권장한다.
 
-- 모드 설정: [Judge Worker 모드 설정](./worker-mode-configuration.md)
-- 구조 구분: [현재 아키텍처 vs 검토 중 아키텍처](./current-vs-target-architecture.md)
-- 구조 검토: [Cloud Run 기반 채점 구조 검토](./cloud-run-architecture-review.md)
-- 서비스 개선: [JudgeService 개선 정리](./judge-service-improvements.md)
-- E2E 확인: [Judge Worker E2E 시나리오](./judge-worker-e2e.md)
-- 수동 점검: [Judge Worker 검증 체크리스트](./worker-validation-checklist.md)
-- 연동 점검: [Next.js와 Spring Worker 연동 체크리스트](./nextjs-spring-worker-checklist.md)
-- 동시성 점검: [Judge Worker 동시성 점검](./judge-worker-concurrency-check.md)
-- cleanup 점검: [Judge Worker Cleanup 점검](./judge-worker-cleanup-check.md)
-- 발표용 요약: [Judge Worker 데모 스크립트](./judge-worker-demo-script.md)
+## 11. 관련 문서
 
-## 현재 문서가 다루지 않는 범위
-
-- 운영 배포 구조
-- worker 다중 인스턴스 운영 전략
-- 고급 sandbox hardening
-- autoscaling
-- 실시간 push
-- 운영 모니터링과 장애 대응 체계
+- [로컬 실행 코드와 배포 코드 구분 가이드](./local-vs-deployment-code-guide.md)
+- [Judge Worker 모드 설정](./worker-mode-configuration.md)
+- [로컬 Orchestrator/Runner 분리 실행](./local-orchestrator-runner.md)
+- [배포 준비 체크리스트](./deployment-readiness.md)

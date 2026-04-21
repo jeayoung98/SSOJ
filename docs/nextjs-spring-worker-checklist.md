@@ -1,100 +1,114 @@
-# Next.js와 Spring Worker 연동 체크리스트
+# Next.js/API와 Spring Worker 연동 체크리스트
 
-이 문서는 현재 Docker 기반 로컬 개발/검증용 worker 기준 문서입니다. 운영 최종 구조 문서가 아니며, 현재 Next.js 제출 경로와 Spring worker 사이의 로컬 계약만 점검합니다. 운영 환경 적용 전에는 큐 계약, 장애 복구, 멀티 인스턴스 전략을 다시 검토해야 합니다.
+이 문서는 전체 서비스에서 Web/API 계층이 Spring judge worker와 연동할 때 지켜야 할 계약을 정리한다.
 
-## 문서 범위
+현재 이 저장소에는 Next.js 소스가 포함되어 있지 않다. 따라서 이 문서는 실제 Next.js 코드 검증 문서가 아니라, Spring worker가 기대하는 외부 계약을 현재 코드 기준으로 정리한 문서다.
 
-- 구현 완료된 현재 Next.js-Spring worker 계약 확인
-- 로컬 개발과 수동 검증 기준
-- 운영 구조로는 재검토 필요
+## 1. DB 저장 계약
 
-## 공통 기준
+Web/API는 enqueue 전에 `submissions` row를 먼저 저장해야 한다.
 
-- Redis queue key: `judge:queue`
-- Redis payload: `submissionId`
-- 상태값:
-  - `PENDING`
-  - `JUDGING`
-  - `AC`
-  - `WA`
-  - `CE`
-  - `RE`
-  - `TLE`
-  - `MLE`
-  - `SYSTEM_ERROR`
-- 현재 실행 가능한 언어:
-  - `java`
-  - `python`
-  - `cpp`
-- 실행 방식:
-  - Spring worker가 Docker 기반 executor를 사용
+필수 기준:
 
-## Redis 계약
+- `submissions.id`: UUID
+- `submissions.user_id`: UUID
+- `submissions.problem_id`: `problems.id`와 같은 문자열
+- `submissions.language`: `cpp`, `java`, `python` 중 하나
+- `submissions.source_code`: 제출 코드
+- `submissions.status`: `PENDING`
+- `submissions.submitted_at`: 제출 시각
 
-- Next.js가 `judge:queue`에 push 하는지
-- Spring worker가 `judge:queue`를 읽는지
-- payload가 JSON이 아니라 `submissionId` plain value인지
-- Next.js와 worker가 같은 Redis 인스턴스를 보는지
+채점 전에는 일반적으로 다음 값이 비어 있을 수 있다.
 
-## Submission 생성 계약
+- `submissions.result`
+- `submissions.execution_time_ms`
+- `submissions.memory_kb`
+- `submissions.judged_at`
 
-- Next.js가 `submission`을 먼저 저장하는지
-- 초기 상태를 `PENDING`으로 저장하는지
-- `language` 값이 worker 기대값과 일치하는지
+## 2. Redis queue 계약
 
-권장 `language` 값:
+로컬 Redis polling 경로에서 Web/API는 다음 queue에 UUID 문자열만 push한다.
 
-- `java`
-- `python`
-- `cpp`
+- key: `judge:queue`
+- value: `submissionId` UUID 문자열
 
-## worker 기대 상태 전이
-
-1. Next.js가 `submission` row 저장
-2. Next.js가 Redis `judge:queue`에 `submissionId` push
-3. worker가 queue consume
-4. worker가 `PENDING -> JUDGING`
-5. worker가 `started_at` 저장
-6. worker가 hidden test case를 Docker에서 실행
-7. 첫 실패 시 즉시 중단
-8. 실행된 case까지만 `submission_case_result` 저장
-9. worker가 최종 `submission.status`와 `finished_at` 저장
-
-## 빠른 점검 목록
-
-- Next.js가 `submissionId`만 enqueue 하는가
-- queue key가 `judge:queue`와 일치하는가
-- `submission.status` 초기값이 `PENDING`인가
-- `language`가 `java`, `python`, `cpp` 중 하나인가
-- worker 로그에 `Received submissionId=... from Redis queue judge:queue`가 보이는가
-- 결과적으로 `started_at`, `finished_at`이 저장되는가
-
-## 문제 발생 시 먼저 볼 것
-
-- 제출이 계속 `PENDING`
-  - enqueue 자체가 안 됨
-  - Redis key 불일치
-  - payload 파싱 실패
-  - worker 비활성화
-- 제출이 `JUDGING`에서 멈춤
-  - Docker 실행 문제
-  - 언어별 executor 문제
-  - hidden test case 데이터 문제
-- 최종 상태가 `SYSTEM_ERROR`
-  - Docker 이미지 또는 Docker daemon 문제
-  - 지원하지 않는 언어
-  - executor 예외
-
-## 빠른 수동 검증
+예:
 
 ```powershell
-redis-cli LPUSH judge:queue <submissionId>
-redis-cli LRANGE judge:queue 0 -1
+redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
 ```
 
-DB에서 확인:
+JSON payload가 아니라 plain UUID 문자열이다.
 
-- `submission.status`
-- `started_at`
-- `finished_at`
-- `submission_case_result`
+## 3. Cloud Tasks 계약
+
+배포 remote 경로에서 Cloud Tasks HTTP payload는 다음 형태다.
+
+```json
+{
+  "submissionId": "00000000-0000-0000-0000-000000000001"
+}
+```
+
+호출 대상:
+
+```text
+POST /internal/judge-executions
+```
+
+## 4. Worker 처리 흐름
+
+1. Web/API가 `submissions` row를 `PENDING`으로 저장
+2. Web/API 또는 dispatch 계층이 `submissionId` 전달
+3. worker가 submission을 조회
+4. worker가 `PENDING -> JUDGING`
+5. worker가 `problem_testcases`의 hidden testcase를 순서대로 실행
+6. 첫 실패 시 중단
+7. 실행된 testcase 결과만 `submission_testcase_results`에 저장
+8. worker가 `submissions.status=DONE`, `submissions.result=<결과>`, `submissions.judged_at=<완료시각>` 저장
+
+## 5. 빠른 점검 목록
+
+- `submissionId`가 UUID 문자열인가
+- queue key가 `judge:queue`인가
+- Redis payload가 JSON이 아니라 plain UUID 문자열인가
+- 초기 `submissions.status`가 `PENDING`인가
+- `language`가 `cpp`, `java`, `python` 중 하나인가
+- `problem_id`가 `problems.id` 문자열과 일치하는가
+- 해당 problem에 hidden `problem_testcases`가 있는가
+- worker 처리 후 `submissions.status=DONE`이 되는가
+- worker 처리 후 `submissions.result`가 저장되는가
+- testcase별 결과가 `submission_testcase_results`에 저장되는가
+
+## 6. 문제 발생 시 먼저 볼 곳
+
+submission이 계속 `PENDING`:
+
+- enqueue가 안 됨
+- Redis key 불일치
+- UUID payload 파싱 실패
+- worker 비활성화
+- remote 경로에서 Cloud Tasks 미전달
+
+submission이 `JUDGING`에서 멈춤:
+
+- executor 예외
+- Docker daemon 문제
+- runner 호출 실패
+- DB 저장 실패
+
+`SYSTEM_ERROR`:
+
+- 지원하지 않는 언어
+- Docker image/daemon 문제
+- remote runner 장애
+- executor 예외
+
+## 7. 이 저장소에서 확인할 코드
+
+- `JudgeQueueConsumer`: Redis queue consume
+- `JudgeExecutionController`: Cloud Tasks/HTTP trigger endpoint
+- `JudgeService`: 채점 흐름
+- `JudgePersistenceService`: DB 상태 전환과 결과 저장
+- `RedisJudgeDispatchService`: Redis dispatch
+- `CloudTasksJudgeDispatchService`: Cloud Tasks dispatch

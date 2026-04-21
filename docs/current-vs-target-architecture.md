@@ -1,94 +1,94 @@
-# 현재 아키텍처 vs 검토 중 아키텍처
+# 현재 아키텍처와 목표 아키텍처
 
-이 문서는 현재 구현된 구조와 검토 중인 구조를 섞지 않고 구분해서 설명하기 위한 요약 문서입니다. 면접이나 포트폴리오에서 "지금 구현한 것"과 "다음 단계로 검토하는 것"을 짧게 설명할 때 사용하는 용도를 기준으로 작성했습니다.
+이 문서는 현재 구현된 구조와 앞으로 운영 관점에서 확장할 수 있는 목표 구조를 구분한다. 현재 코드에 없는 기능은 구현 완료처럼 표현하지 않는다.
 
-## 문서 범위
+## 1. 현재 구현된 구조
 
-- 현재 구현된 아키텍처 요약
-- 검토 중인 목표 아키텍처 방향 요약
-- 현재 구현됨 / 검토 중 / 미구현 항목 구분
+현재 Spring Boot 코드는 judge worker 역할을 중심으로 구성되어 있다.
 
-## 현재 아키텍처
+구성 요소:
 
-현재 구현 기준 아키텍처는 아래와 같습니다.
-
-- Next.js / API
-  - 문제 조회
-  - 코드 제출
-  - 제출 상태 / 결과 조회
 - PostgreSQL
-  - 문제, 테스트케이스, 제출, 케이스별 결과 저장
-- Redis queue
-  - `judge:queue`
-  - payload는 `submissionId`
-- Spring Judge Worker
-  - Redis를 polling 하며 submission을 비동기로 채점
-  - `PENDING -> JUDGING -> 최종 상태` 처리
-- Docker 기반 실행
-  - worker 내부 executor가 직접 `docker run` 호출
-  - Java / Python / C++ 채점 수행
+  - `users`
+  - `problems`
+  - `problem_examples`
+  - `problem_testcases`
+  - `submissions`
+  - `submission_testcase_results`
+- Redis
+  - local mode queue
+  - key: `judge:queue`
+  - payload: UUID `submissionId`
+- Spring Boot orchestrator
+  - submission 조회
+  - hidden testcase 조회
+  - 채점 상태/결과 저장
+- Spring Boot runner
+  - 단일 실행 요청 처리
+  - Docker 기반 실행
+- Docker executor
+  - C++/Java/Python 실행
 
-현재 구조의 핵심은 "상시 떠 있는 Spring worker가 Redis queue를 읽고, Docker를 직접 실행해서 채점하는 구조"입니다.
+## 2. 로컬 현재 흐름
 
-## 검토 중 아키텍처
+```text
+Next.js 또는 수동 입력
+-> submissions row 생성
+-> Redis judge:queue에 submissionId push
+-> JudgeQueueConsumer consume
+-> JudgeService 실행
+-> Docker executor 실행
+-> submissions / submission_testcase_results 저장
+```
 
-검토 중인 방향은 아래와 같습니다.
+상태 저장 기준:
 
-- 요청형 실행 구조
-  - 항상 떠 있는 worker보다 요청 또는 job 단위로 채점 실행
-- Cloud Run 기반 후보
-  - scale-to-zero
-  - 요청 기반 과금
-  - 개인 프로젝트 초기 운영 비용 절감 기대
-- 실행 방식 재설계 필요
-  - 현재 `docker run` 기반 executor를 그대로 옮기는 방식이 아님
-  - queue 소비 방식, 채점 시작 방식, sandbox 방식까지 다시 설계해야 함
+- `submissions.status`: `PENDING -> JUDGING -> DONE`
+- `submissions.result`: `AC`, `WA`, `CE`, `RE`, `TLE`, `MLE`, `SYSTEM_ERROR`
 
-검토 중 구조의 핵심은 "상시 worker를 유지하는 구조"가 아니라 "필요할 때만 실행되는 채점 구조"를 고려한다는 점입니다.
+## 3. 배포 현재 흐름
 
-## 현재 구조와 검토 구조를 섞으면 안 되는 이유
+현재 코드가 지원하는 배포형 흐름:
 
-현재 구조는 이미 동작하는 구현입니다.
+```text
+submissionId
+-> Cloud Tasks
+-> orchestrator /internal/judge-executions
+-> runner /internal/runner-executions
+-> orchestrator DB 저장
+```
 
-- Next.js
-- PostgreSQL
-- Redis queue
-- Spring Judge Worker
-- Docker 기반 executor
+이 구조에서 orchestrator는 Cloud Run에 잘 맞는다. runner는 현재 Docker daemon 의존이 있으므로 표준 Cloud Run에서 실제 실행 가능한지는 확실하지 않다.
 
-반면 검토 중 구조는 아직 방향만 있는 상태입니다.
+## 4. 목표 아키텍처 방향
 
-- 요청형 실행 구조
-- Cloud Run 기반 후보
-- 채점 실행 모델 재설계
+목표 방향:
 
-즉, 지금 포트폴리오에서 말할 수 있는 것은 "현재는 Spring worker + Redis + Docker 구조를 구현했다"이고, 추가로 "비용과 운영 부담을 줄이기 위해 Cloud Run 기반 요청형 구조를 검토 중이다"까지가 정확한 설명입니다.
+- orchestrator는 stateless HTTP service로 유지
+- 비동기 trigger는 Cloud Tasks 사용
+- runner는 격리된 실행 환경에서 단일 testcase 실행만 담당
+- DB schema는 Supabase PostgreSQL 기존 테이블을 그대로 사용
+- 상태와 결과는 계속 분리
 
-## 한 줄 비교
+아직 미확정인 부분:
 
-- 현재 아키텍처:
-  - 상시 worker가 Redis queue를 읽고 Docker로 채점
-- 검토 중 아키텍처:
-  - 요청형 실행 구조로 전환하고 Cloud Run 같은 서버리스 후보를 검토
+- runner를 Cloud Run에서 그대로 운영할지
+- Docker 가능한 VM을 runner host로 둘지
+- Docker executor를 Cloud Run 호환 실행 백엔드로 바꿀지
+- 강한 sandbox hardening을 어떤 방식으로 구현할지
 
-## 상태 구분표
+## 5. 현재와 목표 비교
 
-| 구분 | 항목 | 설명 |
+| 구분 | 현재 코드 | 목표 방향 |
 | --- | --- | --- |
-| 현재 구현됨 | Next.js / API | 제출, 조회, 상태 확인을 담당하는 웹/API 계층 |
-| 현재 구현됨 | PostgreSQL | 문제, 테스트케이스, 제출, 채점 결과 저장 |
-| 현재 구현됨 | Redis queue | `judge:queue`에 `submissionId`를 넣고 worker가 consume |
-| 현재 구현됨 | Spring Judge Worker | 상시 실행되며 Redis polling 후 채점 수행 |
-| 현재 구현됨 | Docker 기반 실행 | executor가 직접 `docker run`을 호출해 Java / Python / C++ 실행 |
-| 검토 중 | 요청형 실행 구조 | 상시 worker 대신 요청 또는 job 단위로 채점 실행 |
-| 검토 중 | Cloud Run 기반 후보 | scale-to-zero, 요청 기반 과금, 초기 운영 비용 절감 목적 |
-| 검토 중 | 실행 방식 재설계 | 현재 Docker executor와 queue 소비 모델을 그대로 쓰지 않는 방향 검토 |
-| 미구현 | Cloud Run용 채점 아키텍처 | Cloud Run 제약에 맞는 실제 채점 실행 구조 |
-| 미구현 | Docker 대체 또는 원격 sandbox 방식 | 현재 로컬 `docker run` 대신 쓸 실행 모델 |
-| 미구현 | 요청형 queue / job orchestration | 요청 기반 채점 시작과 완료 처리 흐름 |
-| 미구현 | 전환 후 운영 구조 | 배포, 확장, 장애 대응을 포함한 최종 운영 설계 |
+| queue | local은 Redis, remote는 Cloud Tasks | remote 운영은 Cloud Tasks 중심 |
+| orchestrator | 구현됨 | Cloud Run 배포 가능 |
+| runner | 구현됨 | 실행 host 전략 확정 필요 |
+| DB schema | Supabase 기존 테이블 매핑 | DB 변경 없이 유지 |
+| status/result | 분리됨 | 유지 |
+| sandbox | Docker 기반 MVP | 운영 수준 hardening 필요 |
+| Next.js | 저장소에 없음 | 외부 web/API가 submission 저장 후 enqueue |
 
-## 면접용 설명 예시
+## 6. 핵심 구분
 
-"현재는 Next.js, PostgreSQL, Redis queue, Spring Judge Worker, Docker 기반 실행으로 온라인 저지 MVP를 구현했습니다.  
-추가로 개인 프로젝트 비용과 운영 부담을 줄이기 위해 Cloud Run 기반 요청형 실행 구조를 검토하고 있지만, 이건 단순 인프라 교체가 아니라 채점 실행 방식 자체를 다시 설계해야 하는 단계라 아직 구현 전입니다."
+현재 완료된 것은 "Spring Boot judge worker가 로컬/원격 실행 모드를 설정으로 나눠 동작할 수 있는 구조"다. 아직 완료되지 않은 것은 "표준 Cloud Run만으로 안전하게 사용자 코드를 실행하는 최종 sandbox 구조"다.

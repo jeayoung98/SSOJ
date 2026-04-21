@@ -1,157 +1,157 @@
 # Judge Worker 검증 체크리스트
 
-이 문서는 현재 Docker 기반 로컬 개발/검증용 worker 기준 문서입니다. 운영 최종 구조 문서가 아니며, 현재 구현 완료 범위를 수동으로 검증하기 위한 체크리스트입니다. 운영 환경 적용 전에는 계약과 장애 대응 방식을 다시 검토해야 합니다.
+이 문서는 현재 코드 기준으로 judge worker를 수동 검증할 때 확인할 항목을 정리한다.
 
-## 문서 범위
+## 1. 검증 전제
 
-- 구현 완료된 현재 worker 검증
-- 로컬 개발과 수동 검증 기준
-- 운영 구조로는 재검토 필요
+현재 DB 매핑 기준:
 
-## 공통 기준
+- `problems.id`: 문자열
+- `problem_testcases.id`: UUID
+- `submissions.id`: UUID
+- `submission_testcase_results.id`: UUID
 
-- Redis queue key: `judge:queue`
-- Redis payload: `submissionId`
-- 상태값:
-  - `PENDING`
-  - `JUDGING`
-  - `AC`
-  - `WA`
-  - `CE`
-  - `RE`
-  - `TLE`
-  - `MLE`
-  - `SYSTEM_ERROR`
-- 현재 실행 가능한 언어:
-  - `java`
-  - `python`
-  - `cpp`
-- 실행 방식:
-  - Docker 기반 실행
-- 채점 정책:
-  - hidden test case 순차 실행
-  - 첫 실패 시 즉시 중단
-  - 실행된 case까지만 결과 저장
-  - `started_at`, `finished_at`, 최종 상태 저장
+상태/결과 기준:
 
-## 현재 구현됨
+- `submissions.status`: `PENDING`, `JUDGING`, `DONE`
+- `submissions.result`: `AC`, `WA`, `CE`, `RE`, `TLE`, `MLE`, `SYSTEM_ERROR`
+- 완료 시각: `submissions.judged_at`
 
-- Java, Python, C++ executor 존재
-- Java compile error는 현재 구현상 `CE` 기대 가능
-- C++ executor는 로컬 검증 범위에 포함
-- 첫 실패 이후 뒤 test case는 실행되지 않음
+## 2. 로컬 Redis polling 검증
 
-## 추가 개선 필요
+설정:
 
-- C++ compile error를 Java처럼 확정적으로 `CE`로 분류하는 규칙은 아직 없음
-- C++ compile error 검증은 현재 저장 결과를 확인하는 방식으로만 해석해야 함
-- 언어별 세부 에러 매핑은 추가 정리 필요
-
-## 공통 준비
-
-문제와 hidden test case 준비:
-
-```sql
-insert into problem (id, title, description, time_limit_ms, memory_limit_mb)
-values (100, 'A+B', 'sum two integers', 3000, 256)
-on conflict (id) do update
-set title = excluded.title,
-    description = excluded.description,
-    time_limit_ms = excluded.time_limit_ms,
-    memory_limit_mb = excluded.memory_limit_mb;
-
-delete from test_case where problem_id = 100;
-
-insert into test_case (id, problem_id, input, output, is_hidden) values
-  (1001, 100, '1 2', '3', true),
-  (1002, 100, '10 20', '30', true),
-  (1003, 100, '100 -5', '95', true);
+```properties
+worker.role=orchestrator
+worker.mode=redis-polling
+judge.dispatch.mode=redis
+judge.execution.mode=docker
 ```
 
-공통 확인 SQL:
-
-```sql
-select id, language, status, started_at, finished_at
-from submission
-where id = :submission_id;
-
-select submission_id, test_case_id, status, execution_time_ms, memory_usage_kb
-from submission_case_result
-where submission_id = :submission_id
-order by test_case_id;
-```
-
-공통 enqueue:
+실행:
 
 ```powershell
-redis-cli LPUSH judge:queue <submissionId>
+.\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
-## Java 검증
+enqueue:
 
-- WA: `samples/submissions/java/wa/Main.java`
-- CE: `samples/submissions/java/ce/Main.java`
-- RE: `samples/submissions/java/re/Main.java`
-- TLE: `samples/submissions/java/tle/Main.java`
-
-확인:
-
-- 최종 `submission.status`가 기대값인지
-- `started_at`, `finished_at`이 저장됐는지
-- 첫 실패 시 뒤 test case 결과가 저장되지 않는지
-
-## Python 검증
-
-- WA: `samples/submissions/python/wa/main.py`
-- RE: `samples/submissions/python/re/main.py`
-- TLE: `samples/submissions/python/tle/main.py`
+```powershell
+redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
+```
 
 확인:
 
-- 최종 `submission.status`가 기대값인지
-- `started_at`, `finished_at`이 저장됐는지
-- 첫 실패 시 뒤 test case 결과가 저장되지 않는지
+- Redis payload가 UUID 문자열인가
+- worker log에 `Received submissionId=... from Redis queue judge:queue`가 보이는가
+- `submissions.status`가 `PENDING -> JUDGING -> DONE`으로 바뀌는가
+- `submissions.result`가 기대 결과로 저장되는가
+- `submissions.judged_at`이 저장되는가
+- 실행된 testcase까지만 `submission_testcase_results`가 생성되는가
 
-## C++ 검증
+## 3. DB 확인 SQL
 
-- AC: `samples/submissions/cpp/ac/main.cpp`
-- WA: `samples/submissions/cpp/wa/main.cpp`
-- CE 확인용: `samples/submissions/cpp/ce/main.cpp`
-- RE: `samples/submissions/cpp/re/main.cpp`
-- TLE: `samples/submissions/cpp/tle/main.cpp`
+submission 확인:
+
+```sql
+select id, problem_id, language, status, result, execution_time_ms, memory_kb, submitted_at, judged_at
+from submissions
+where id = :submission_id;
+```
+
+testcase 결과 확인:
+
+```sql
+select submission_id, testcase_id, result, execution_time_ms, memory_kb, error_message
+from submission_testcase_results
+where submission_id = :submission_id
+order by testcase_id;
+```
+
+hidden testcase 확인:
+
+```sql
+select id, problem_id, testcase_order, input_text, expected_output, is_hidden
+from problem_testcases
+where problem_id = :problem_id
+order by testcase_order;
+```
+
+## 4. 언어별 검증
+
+샘플 파일:
+
+- C++: `samples/submissions/cpp/*/main.cpp`
+- Java: `samples/submissions/java/*/Main.java`
+- Python: `samples/submissions/python/*/main.py`
+
+확인 결과:
+
+- AC 샘플은 `submissions.result=AC`
+- WA 샘플은 `submissions.result=WA`
+- RE 샘플은 `submissions.result=RE`
+- TLE 샘플은 `submissions.result=TLE`
+- Java compile error는 현재 코드에서 `stderr`에 `error:`가 포함되면 `CE`
+
+C++ compile error의 CE 분류는 별도 보강이 필요할 수 있다. 현재 코드는 Java compile error를 명시적으로 CE로 매핑한다.
+
+## 5. Remote orchestrator/runner 검증
+
+runner:
+
+```powershell
+.\gradlew.bat bootRun --args="--spring.profiles.active=runner --server.port=8081"
+```
+
+orchestrator:
+
+```powershell
+.\gradlew.bat bootRun --args="--spring.profiles.active=remote --server.port=8080 --judge.execution.remote.base-url=http://localhost:8081"
+```
+
+trigger:
+
+```powershell
+curl -X POST http://localhost:8080/internal/judge-executions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"submissionId\":\"00000000-0000-0000-0000-000000000001\"}"
+```
 
 확인:
 
-- AC, WA, RE, TLE가 현재 구현 결과와 일치하는지
-- `started_at`, `finished_at`이 저장됐는지
-- 첫 실패 시 뒤 test case 결과가 저장되지 않는지
-- C++ compile error는 `CE`를 고정 기대하지 않고 실제 최종 상태를 확인하는지
+- orchestrator가 `/internal/judge-executions`를 받는가
+- runner가 `/internal/runner-executions`를 받는가
+- runner는 DB/Redis 없이 실행되는가
+- 최종 결과는 orchestrator가 DB에 저장하는가
 
-## 동시성 검증
+## 6. 동시성 검증
 
-- `worker.max-concurrency=2` 확인
-- 느린 submission 3개 이상 enqueue
-- 어느 시점에도 `JUDGING`가 2개를 넘지 않는지 확인
+기본값:
 
-## cleanup 검증
+```properties
+worker.max-concurrency=2
+```
 
-- temp directory prefix 확인:
-  - `judge-java-*`
-  - `judge-python-*`
-  - `judge-cpp-*`
-- `docker ps -a`에서 judge 컨테이너가 남지 않는지 확인
-- 실패나 timeout 이후에도 `finished_at`이 저장되는지 확인
+확인:
 
-## Next.js 연동 검증
+- 동시에 실행 중인 Redis polling worker 작업이 2개를 넘지 않는가
+- 세 번째 submission은 semaphore가 풀린 뒤 처리되는가
+- 실패/예외 상황에서도 semaphore가 release되는가
 
-- Next.js가 `submission`을 먼저 저장하는지
-- Redis `judge:queue`에 `submissionId`만 push 하는지
-- worker가 같은 DB와 Redis를 보는지
+## 7. Cleanup 검증
 
-## 완료 기준
+확인:
 
-- queue consume 확인
-- `PENDING -> JUDGING -> 최종 상태` 확인
-- `started_at`, `finished_at` 확인
-- 실행된 case까지만 `submission_case_result` 저장 확인
-- 첫 실패 즉시 중단 확인
+- timeout 후 Docker process/container가 정리되는가
+- temp workspace가 삭제되는가
+- `.container.cid` 파일이 남지 않는가
+- 실패해도 `submissions.status=DONE`, `submissions.result=SYSTEM_ERROR` 또는 해당 결과로 마감되는가
+
+## 8. 완료 기준
+
+- UUID submissionId queue/HTTP trigger가 정상 동작
+- `PENDING -> JUDGING -> DONE` 전환 확인
+- `result`, `judged_at`, `execution_time_ms`, `memory_kb` 저장 확인
+- `submission_testcase_results` 저장 확인
+- 첫 실패 이후 추가 testcase를 실행하지 않음
+- Docker cleanup 확인

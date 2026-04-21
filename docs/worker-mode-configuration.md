@@ -1,110 +1,138 @@
 # Judge Worker 모드 설정
 
-이 문서는 현재 코드 기준으로 local 모드와 remote 모드가 어떻게 나뉘는지 설명하는 설정 메모다. 운영 최종 배포 문서가 아니라, 점진 전환 구조를 코드와 설정 기준으로 이해하기 위한 문서다.
+이 문서는 현재 코드 기준으로 `worker.role`, `worker.mode`, `judge.dispatch.mode`, `judge.execution.mode`가 어떤 Spring bean과 실행 경로를 선택하는지 정리한다.
 
-## 기준 설정값
+## 1. 설정 축
 
-현재 worker는 아래 3개 설정값으로 진입점, dispatch 방식, 실행 방식을 구분한다.
+### `worker.role`
 
-- `worker.mode`
-- `judge.dispatch.mode`
-- `judge.execution.mode`
+서비스 역할을 결정한다.
 
-각 설정의 역할은 아래와 같다.
+| 값 | 의미 | 활성 코드 |
+| --- | --- | --- |
+| `orchestrator` | DB 기반 채점 흐름 담당 | `JudgeService`, `JudgePersistenceService`, dispatch 구현 |
+| `runner` | 단일 코드 실행 담당 | `RunnerExecutionController`, `RunnerExecutionService`, `RunnerLanguageExecutorSelector` |
 
-- `worker.mode`
-  - judge 실행 진입점을 결정한다.
-  - `redis-polling`이면 `JudgeQueueConsumer`가 Redis queue를 polling한다.
-  - `http-trigger`이면 `JudgeExecutionController`가 내부 HTTP 요청으로 `JudgeService`를 호출한다.
-- `judge.dispatch.mode`
-  - `submissionId`를 worker 쪽으로 전달하는 dispatch 구현을 결정한다.
-  - `redis`면 `RedisJudgeDispatchService`가 Redis `judge:queue`에 `submissionId`를 넣는다.
-  - `cloud-tasks`는 운영 경로용 확장 포인트이며, 현재는 구현 골격만 준비된 상태다.
-- `judge.execution.mode`
-  - 실제 코드 실행을 어떤 gateway로 위임할지 결정한다.
-  - `docker`면 `DockerExecutionGateway`가 기존 `JavaExecutor`, `PythonExecutor`, `CppExecutor`를 사용한다.
-  - `remote`면 `RemoteExecutionGateway`가 HTTP 기반 remote runner 호출을 사용한다.
+기본값은 `orchestrator`에 가깝다. 여러 bean이 `matchIfMissing = true`로 orchestrator 경로를 기본 활성화한다.
 
-## local 모드
+### `worker.mode`
 
-local 모드는 기존 로컬 Docker 검증 경로다.
+orchestrator의 진입 방식을 결정한다.
 
-- `worker.mode=redis-polling`
-- `judge.dispatch.mode=redis`
-- `judge.execution.mode=docker`
+| 값 | 의미 | 활성 코드 |
+| --- | --- | --- |
+| `redis-polling` | Redis queue를 주기적으로 polling | `JudgeQueueConsumer` |
+| `http-trigger` | 내부 HTTP 요청으로 채점 시작 | `JudgeExecutionController` |
+| `runner` | runner profile에서 사용하는 값 | runner 활성 조건은 `worker.role=runner`가 핵심 |
 
-동작:
+### `judge.dispatch.mode`
 
-- `JudgeQueueConsumer` 활성화
-- Redis `judge:queue` polling
-- `RedisJudgeDispatchService` 사용
-- `DockerExecutionGateway` 사용
-- 기존 `JavaExecutor` / `PythonExecutor` / `CppExecutor` 재사용
+submissionId를 채점 시작 지점으로 보내는 방식을 결정한다.
 
-## remote 모드
+| 값 | 의미 | 활성 코드 |
+| --- | --- | --- |
+| `redis` | Redis List `judge:queue`에 UUID 문자열 push | `RedisJudgeDispatchService` |
+| `cloud-tasks` | Cloud Tasks HTTP task 생성 | `CloudTasksJudgeDispatchService`, `GoogleCloudTasksGateway` |
 
-remote 모드는 운영 전환을 위한 HTTP trigger + remote execution 조합이다.
+### `judge.execution.mode`
 
-- `worker.mode=http-trigger`
-- `judge.dispatch.mode=cloud-tasks`
-- `judge.execution.mode=remote`
+실제 코드 실행 위치를 결정한다.
 
-동작:
+| 값 | 의미 | 활성 코드 |
+| --- | --- | --- |
+| `docker` | 현재 프로세스가 Docker executor로 실행 | `DockerExecutionGateway` |
+| `remote` | remote runner HTTP 호출 | `RemoteExecutionGateway`, `HttpRemoteExecutionClient` |
 
-- `JudgeQueueConsumer` 비활성화
-- `JudgeExecutionController` 활성화
-- `CloudTasksJudgeDispatchService` 선택 가능
-- `RemoteExecutionGateway` 사용
-- 실제 코드 실행은 remote runner HTTP 호출로 위임
+## 2. 로컬 검증 조합
 
-메모:
+```properties
+worker.role=orchestrator
+worker.mode=redis-polling
+judge.dispatch.mode=redis
+judge.execution.mode=docker
+```
 
-- 현재 `CloudTasksJudgeDispatchService`는 골격만 있고 실제 SDK 연동은 아직 미구현이다.
-- 현재 `RemoteExecutionGateway`는 HTTP 기반 remote runner 호출까지 정리된 상태다.
-- 즉, 운영 모드용 조합은 코드상 준비되어 있지만 Cloud Tasks 실제 호출과 remote runner 운영 배포는 아직 별도 구현이 필요하다.
-
-## application profile 예시
-
-저장소에는 아래 예시 프로필 파일이 포함되어 있다.
-
-- `application-local.properties`
-- `application-remote.properties`
-
-의도:
-
-- `application-local.properties`
-  - 로컬 개발/검증용 기본 조합
-  - Redis polling + Docker execution
-- `application-remote.properties`
-  - 운영 전환 직전 검토용 조합
-  - HTTP trigger + remote execution
-  - dispatch는 `cloud-tasks`로 분리되어 있지만 실제 호출은 아직 미구현
-
-실행 예시:
+사용 profile:
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
+흐름:
+
+```text
+submissionId(UUID) -> Redis judge:queue -> JudgeQueueConsumer -> JudgeService -> DockerExecutionGateway -> DB 저장
+```
+
+로컬용으로 보는 근거:
+
+- Redis polling은 장기 실행 worker 모델이다.
+- Docker executor는 로컬 Docker daemon 또는 Docker-capable host가 필요하다.
+- `docker-compose.yml`은 PostgreSQL, Redis, judge-worker를 로컬 검증용으로 묶는다.
+
+## 3. 배포 orchestrator 조합
+
+```properties
+worker.role=orchestrator
+worker.mode=http-trigger
+judge.dispatch.mode=cloud-tasks
+judge.execution.mode=remote
+```
+
+사용 profile:
+
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=remote"
 ```
 
-## 간단한 흐름
+흐름:
 
-### local
+```text
+submissionId(UUID) -> Cloud Tasks -> POST /internal/judge-executions -> JudgeService -> RemoteExecutionGateway -> runner HTTP -> DB 저장
+```
 
-`submissionId -> Redis queue -> JudgeQueueConsumer -> JudgeService -> DockerExecutionGateway`
+배포용으로 보는 근거:
 
-### remote
+- Redis polling을 사용하지 않는다.
+- Cloud Tasks가 비동기 trigger 역할을 한다.
+- 실제 실행은 별도 runner에 위임한다.
 
-`submissionId -> dispatch 계층 -> HTTP trigger -> JudgeService -> RemoteExecutionGateway -> remote runner`
+## 4. Runner 조합
 
-## 현재 상태
+```properties
+worker.role=runner
+worker.mode=runner
+judge.execution.mode=docker
+```
 
-| 구분 | 상태 |
-| --- | --- |
-| local Redis polling + Docker execution | 구현됨 |
-| HTTP trigger + RemoteExecutionGateway | 구현됨 |
-| Cloud Tasks 실제 호출 | 미구현 |
-| remote runner 실제 운영 배포 | 미구현 |
+사용 profile:
+
+```powershell
+.\gradlew.bat bootRun --args="--spring.profiles.active=runner --server.port=8081"
+```
+
+흐름:
+
+```text
+POST /internal/runner-executions -> RunnerExecutionService -> LanguageExecutor -> DockerProcessExecutor -> RunnerExecutionResponse
+```
+
+runner는 DB와 Redis를 사용하지 않는다. `application-runner.properties`에서 DataSource, JPA, Redis auto-configuration을 제외한다.
+
+## 5. 현재 구현 상태
+
+| 항목 | 상태 | 근거 |
+| --- | --- | --- |
+| local Redis polling + Docker execution | 구현됨 | `JudgeQueueConsumer`, `RedisJudgeDispatchService`, `DockerExecutionGateway` |
+| HTTP trigger orchestrator | 구현됨 | `JudgeExecutionController` |
+| Cloud Tasks dispatch | 구현됨 | `CloudTasksJudgeDispatchService`, `GoogleCloudTasksGateway` |
+| Remote runner HTTP 호출 | 구현됨 | `RemoteExecutionGateway`, `HttpRemoteExecutionClient` |
+| Runner endpoint | 구현됨 | `RunnerExecutionController` |
+| 표준 Cloud Run runner에서 Docker 실행 | 확실하지 않음 | 현재 executor가 `docker run`을 호출하므로 Docker daemon이 필요 |
+
+## 6. 헷갈리기 쉬운 점
+
+- `worker.role=runner`와 `worker.mode=runner`는 같은 의미가 아니다. runner bean 활성화의 핵심 조건은 `worker.role=runner`다.
+- `judge.dispatch.mode`는 채점 요청을 보내는 방식이고, `judge.execution.mode`는 코드를 실행하는 방식이다.
+- `application.properties` 기본값은 운영 기본값이 아니라 로컬 검증에 가까운 기본값이다.
+- 운영 배포에서는 `SPRING_PROFILES_ACTIVE=remote` 또는 `SPRING_PROFILES_ACTIVE=runner`를 명시해야 한다.
