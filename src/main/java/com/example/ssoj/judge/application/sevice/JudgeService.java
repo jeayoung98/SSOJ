@@ -71,6 +71,7 @@ public class JudgeService {
         SubmissionResult finalResult = SubmissionResult.AC;
         Integer maxExecutionTimeMs = null;
         Integer maxMemoryKb = null;
+        Integer failedTestcaseOrder = null;
 
         for (HiddenTestCaseSnapshot testCase : hiddenTestCases) {
             JudgeContext context = new JudgeContext(
@@ -84,12 +85,18 @@ public class JudgeService {
             );
 
             JudgeExecutionResult executionResult = executionGateway.execute(context);
-            SubmissionResult caseResult = determineCaseResult(startedJudging.language(), executionResult, testCase.expectedOutput());
+            SubmissionResult caseResult = determineCaseResult(
+                    startedJudging.language(),
+                    executionResult,
+                    testCase.expectedOutput(),
+                    startedJudging.memoryLimitMb()
+            );
             maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
             maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
 
             caseResults.add(new CaseJudgeResult(
                     testCase.testCaseId(),
+                    testCase.testCaseOrder(),
                     caseResult,
                     executionResult.executionTimeMs(),
                     executionResult.memoryUsageKb(),
@@ -98,17 +105,19 @@ public class JudgeService {
 
             if (caseResult != SubmissionResult.AC) {
                 finalResult = caseResult;
+                failedTestcaseOrder = testCase.testCaseOrder();
                 break;
             }
         }
 
-        return new JudgeRunResult(caseResults, finalResult, maxExecutionTimeMs, maxMemoryKb);
+        return new JudgeRunResult(caseResults, finalResult, maxExecutionTimeMs, maxMemoryKb, failedTestcaseOrder);
     }
 
     private SubmissionResult determineCaseResult(
             String language,
             JudgeExecutionResult executionResult,
-            String expectedOutput
+            String expectedOutput,
+            Integer memoryLimitMb
     ) {
         if (executionResult.systemError()) {
             return SubmissionResult.SYSTEM_ERROR;
@@ -116,6 +125,10 @@ public class JudgeService {
 
         if (executionResult.timedOut()) {
             return SubmissionResult.TLE;
+        }
+
+        if (isMemoryLimitExceeded(executionResult, memoryLimitMb)) {
+            return SubmissionResult.MLE;
         }
 
         if (!executionResult.success()) {
@@ -133,6 +146,18 @@ public class JudgeService {
         }
 
         return SubmissionResult.AC;
+    }
+
+    private boolean isMemoryLimitExceeded(JudgeExecutionResult executionResult, Integer memoryLimitMb) {
+        if (memoryLimitMb == null) {
+            return false;
+        }
+
+        if (executionResult.memoryUsageKb() != null) {
+            return executionResult.memoryUsageKb() > memoryLimitMb * 1024;
+        }
+
+        return Integer.valueOf(137).equals(executionResult.exitCode());
     }
 
     private boolean matchesExpectedOutput(String actualOutput, String expectedOutput) {

@@ -63,6 +63,7 @@ public class JudgePersistenceService {
                 .stream()
                 .map(testcase -> new HiddenTestCaseSnapshot(
                         testcase.getId(),
+                        testcase.getTestcaseOrder(),
                         testcase.getInputText(),
                         testcase.getExpectedOutput()
                 ))
@@ -100,7 +101,13 @@ public class JudgePersistenceService {
             ));
         }
 
-        submission.finish(runResult.finalResult(), runResult.executionTimeMs(), runResult.memoryKb(), judgedAt);
+        submission.finish(
+                runResult.finalResult(),
+                runResult.executionTimeMs(),
+                runResult.memoryKb(),
+                runResult.failedTestcaseOrder(),
+                judgedAt
+        );
         log.info("Submission {} finished with result={}", submissionId, runResult.finalResult());
     }
 }

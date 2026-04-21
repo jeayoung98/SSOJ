@@ -150,9 +150,9 @@ class JudgePipelineIntegrationTest {
     void consume_stopsAfterFirstHiddenCaseFailure_andDoesNotPersistLaterCases() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
         User user = userRepository.save(user());
-        ProblemTestcase firstCase = testCaseRepository.save(testCase(problem, "1", "1\n", true));
-        ProblemTestcase secondCase = testCaseRepository.save(testCase(problem, "2", "2\n", true));
-        testCaseRepository.save(testCase(problem, "3", "3\n", true));
+        ProblemTestcase firstCase = testCaseRepository.save(testCase(problem, 1, "1", "1\n", true));
+        ProblemTestcase secondCase = testCaseRepository.save(testCase(problem, 2, "2", "2\n", true));
+        testCaseRepository.save(testCase(problem, 3, "3", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
         fakeLanguageExecutor.setResults(
@@ -169,6 +169,9 @@ class JudgePipelineIntegrationTest {
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.WA);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isEqualTo(2);
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(6);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(64);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(caseResults).hasSize(2);
         assertThat(caseResults)
@@ -198,7 +201,7 @@ class JudgePipelineIntegrationTest {
     private List<SubmissionTestcaseResult> submissionCaseResults(UUID submissionId) {
         return submissionCaseResultRepository.findAll().stream()
                 .filter(result -> result.getSubmission().getId().equals(submissionId))
-                .sorted(Comparator.comparing(SubmissionTestcaseResult::getId))
+                .sorted(Comparator.comparing(SubmissionTestcaseResult::getExecutionTimeMs))
                 .toList();
     }
 
@@ -222,9 +225,13 @@ class JudgePipelineIntegrationTest {
     }
 
     private static ProblemTestcase testCase(Problem problem, String input, String output, boolean hidden) {
+        return testCase(problem, 1, input, output, hidden);
+    }
+
+    private static ProblemTestcase testCase(Problem problem, int order, String input, String output, boolean hidden) {
         ProblemTestcase testCase = instantiate(ProblemTestcase.class);
         ReflectionTestUtils.setField(testCase, "problem", problem);
-        ReflectionTestUtils.setField(testCase, "testcaseOrder", 1);
+        ReflectionTestUtils.setField(testCase, "testcaseOrder", order);
         ReflectionTestUtils.setField(testCase, "inputText", input);
         ReflectionTestUtils.setField(testCase, "expectedOutput", output);
         ReflectionTestUtils.setField(testCase, "hidden", hidden);
