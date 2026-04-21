@@ -22,17 +22,20 @@ public class CppExecutor implements LanguageExecutor {
     private final String compileCommand;
     private final String runCommand;
     private final DockerProcessExecutor dockerProcessExecutor;
+    private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public CppExecutor(
             @Value("${worker.executor.cpp.image:gcc:13}") String dockerImage,
             @Value("${worker.executor.cpp.compile-command:g++ main.cpp -O2 -std=c++17 -o main}") String compileCommand,
             @Value("${worker.executor.cpp.run-command:./main}") String runCommand,
-            DockerProcessExecutor dockerProcessExecutor
+            DockerProcessExecutor dockerProcessExecutor,
+            WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
         this.dockerImage = dockerImage;
         this.compileCommand = compileCommand;
         this.runCommand = runCommand;
         this.dockerProcessExecutor = dockerProcessExecutor;
+        this.workspaceDirectoryFactory = workspaceDirectoryFactory;
     }
 
     @Override
@@ -44,7 +47,7 @@ public class CppExecutor implements LanguageExecutor {
     public JudgeExecutionResult execute(JudgeContext context) {
         Path tempDirectory = null;
         try {
-            tempDirectory = Files.createTempDirectory("judge-cpp-");
+            tempDirectory = workspaceDirectoryFactory.create("judge-cpp-");
             Files.writeString(tempDirectory.resolve(SOURCE_FILE_NAME), context.sourceCode(), StandardCharsets.UTF_8);
             log.info(
                     "Executing C++ submission {} with image={}, compileCommand={}, runCommand={}",

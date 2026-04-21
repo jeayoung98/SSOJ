@@ -4,6 +4,7 @@ import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
 import com.example.ssoj.judge.executor.CppExecutor;
 import com.example.ssoj.judge.executor.DockerProcessExecutor;
+import com.example.ssoj.judge.executor.WorkspaceDirectoryFactory;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -13,6 +14,10 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CppExecutorTest {
+
+    private final WorkspaceDirectoryFactory workspaceDirectoryFactory = new WorkspaceDirectoryFactory(
+            System.getProperty("java.io.tmpdir") + "/ssoj-test-workspaces"
+    );
 
     @Test
     void execute_deletesTempDirectoryAfterSuccessfulExecution() throws IOException, InterruptedException {
@@ -24,7 +29,8 @@ class CppExecutorTest {
                 "gcc:13",
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
-                dockerProcessExecutor
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
         );
 
         JudgeExecutionResult result = cppExecutor.execute(context("int main() { return 0; }"));
@@ -46,7 +52,8 @@ class CppExecutorTest {
                 "gcc:13",
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
-                dockerProcessExecutor
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
         );
 
         JudgeExecutionResult result = cppExecutor.execute(context("int main() { return 0; }"));

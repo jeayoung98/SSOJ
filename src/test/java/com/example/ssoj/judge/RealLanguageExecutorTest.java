@@ -6,6 +6,7 @@ import com.example.ssoj.judge.executor.CppExecutor;
 import com.example.ssoj.judge.executor.DockerProcessExecutor;
 import com.example.ssoj.judge.executor.JavaExecutor;
 import com.example.ssoj.judge.executor.PythonExecutor;
+import com.example.ssoj.judge.executor.WorkspaceDirectoryFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -18,6 +19,7 @@ class RealLanguageExecutorTest {
     private static final int MEMORY_LIMIT_MB = 128;
 
     private final DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+    private final WorkspaceDirectoryFactory workspaceDirectoryFactory = new WorkspaceDirectoryFactory("/tmp/ssoj-runner-workspaces");
 
     @Test
     void cppExecutor_executesLongRunningButSuccessfulSubmission() {
@@ -26,7 +28,8 @@ class RealLanguageExecutorTest {
                 "gcc:13",
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
-                dockerProcessExecutor
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
         );
 
         JudgeExecutionResult result = cppExecutor.execute(new JudgeContext(
@@ -60,7 +63,7 @@ class RealLanguageExecutorTest {
     @Test
     void javaExecutor_executesLongRunningButSuccessfulSubmission() {
         // 1초 정도 대기한 뒤 정답을 출력하는 실제 제출 코드다.
-        JavaExecutor javaExecutor = new JavaExecutor("eclipse-temurin:17-jdk");
+        JavaExecutor javaExecutor = new JavaExecutor("eclipse-temurin:17-jdk", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeExecutionResult result = javaExecutor.execute(new JudgeContext(
                 1002L,
@@ -94,7 +97,7 @@ class RealLanguageExecutorTest {
     @Test
     void pythonExecutor_executesLongRunningButSuccessfulSubmission() {
         // 1초 정도 대기한 뒤 정답을 출력하는 실제 제출 코드다.
-        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11");
+        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeExecutionResult result = pythonExecutor.execute(new JudgeContext(
                 1003L,

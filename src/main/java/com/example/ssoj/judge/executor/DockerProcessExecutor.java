@@ -31,7 +31,7 @@ public class DockerProcessExecutor {
                 "--rm",
                 "-i",
                 "--cidfile",
-                "/workspace/.container.cid",
+                cidFile.toAbsolutePath().toString(),
                 "--network",
                 "none",
                 "-m",
