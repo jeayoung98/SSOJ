@@ -56,6 +56,9 @@ public class Submission {
     @Column(name = "memory_kb")
     private Integer memoryKb;
 
+    @Column(name = "failed_testcase_order")
+    private Integer failedTestcaseOrder;
+
     @Column(name = "submitted_at", nullable = false)
     private Instant submittedAt;
 
@@ -79,10 +82,21 @@ public class Submission {
     }
 
     public void finish(SubmissionResult result, Integer executionTimeMs, Integer memoryKb, Instant judgedAt) {
+        finish(result, executionTimeMs, memoryKb, null, judgedAt);
+    }
+
+    public void finish(
+            SubmissionResult result,
+            Integer executionTimeMs,
+            Integer memoryKb,
+            Integer failedTestcaseOrder,
+            Instant judgedAt
+    ) {
         this.status = SubmissionStatus.DONE;
         this.result = result;
         this.executionTimeMs = executionTimeMs;
         this.memoryKb = memoryKb;
+        this.failedTestcaseOrder = failedTestcaseOrder;
         this.judgedAt = judgedAt;
     }
 }

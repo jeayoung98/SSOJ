@@ -8,8 +8,18 @@ public record JudgeRunResult(
         List<CaseJudgeResult> caseResults,
         SubmissionResult finalResult,
         Integer executionTimeMs,
-        Integer memoryKb
+        Integer memoryKb,
+        Integer failedTestcaseOrder
 ) {
+
+    public JudgeRunResult(
+            List<CaseJudgeResult> caseResults,
+            SubmissionResult finalResult,
+            Integer executionTimeMs,
+            Integer memoryKb
+    ) {
+        this(caseResults, finalResult, executionTimeMs, memoryKb, null);
+    }
 
     public static JudgeRunResult systemError() {
         return new JudgeRunResult(List.of(), SubmissionResult.SYSTEM_ERROR, null, null);
