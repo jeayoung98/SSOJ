@@ -38,6 +38,8 @@ class JudgeServiceTest {
     private static final UUID SUBMISSION_16 = UUID.fromString("00000000-0000-0000-0000-000000000016");
     private static final UUID SUBMISSION_17 = UUID.fromString("00000000-0000-0000-0000-000000000017");
     private static final UUID SUBMISSION_18 = UUID.fromString("00000000-0000-0000-0000-000000000018");
+    private static final UUID SUBMISSION_19 = UUID.fromString("00000000-0000-0000-0000-000000000019");
+    private static final UUID SUBMISSION_20 = UUID.fromString("00000000-0000-0000-0000-000000000020");
     private static final UUID CASE_201 = UUID.fromString("00000000-0000-0000-0000-000000000201");
     private static final UUID CASE_202 = UUID.fromString("00000000-0000-0000-0000-000000000202");
     private static final UUID CASE_203 = UUID.fromString("00000000-0000-0000-0000-000000000203");
@@ -61,8 +63,8 @@ class JudgeServiceTest {
                 SUBMISSION_11,
                 "python",
                 List.of(
-                        hiddenTestCase(CASE_201, "1 2", "3"),
-                        hiddenTestCase(CASE_202, "5 8", "13")
+                        hiddenTestCase(CASE_201, 1, "1 2", "3"),
+                        hiddenTestCase(CASE_202, 2, "5 8", "13")
                 )
         );
 
@@ -86,8 +88,12 @@ class JudgeServiceTest {
 
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.WA);
+        assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
+        assertThat(runResult.executionTimeMs()).isEqualTo(12);
+        assertThat(runResult.memoryKb()).isEqualTo(64);
         assertThat(runResult.caseResults()).hasSize(1);
         assertThat(runResult.caseResults().get(0).testCaseId()).isEqualTo(CASE_201);
+        assertThat(runResult.caseResults().get(0).testCaseOrder()).isEqualTo(1);
         assertThat(runResult.caseResults().get(0).result()).isEqualTo(SubmissionResult.WA);
         assertThat(finishedAtCaptor.getValue()).isNotNull();
     }
@@ -97,7 +103,10 @@ class JudgeServiceTest {
         StartedJudging startedJudging = startedJudging(
                 SUBMISSION_12,
                 "java",
-                List.of(hiddenTestCase(CASE_203, "", "OK"))
+                List.of(
+                        hiddenTestCase(CASE_203, 1, "", "OK"),
+                        hiddenTestCase(CASE_204, 2, "", "OK")
+                )
         );
 
         JudgeService judgeService = new JudgeService(
@@ -118,10 +127,15 @@ class JudgeServiceTest {
 
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.CE);
+        assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isEqualTo(5);
+        assertThat(runResult.memoryKb()).isEqualTo(64);
         assertThat(runResult.caseResults()).singleElement().satisfies(caseResult -> {
             assertThat(caseResult.testCaseId()).isEqualTo(CASE_203);
+            assertThat(caseResult.testCaseOrder()).isEqualTo(1);
             assertThat(caseResult.result()).isEqualTo(SubmissionResult.CE);
         });
+        verify(executionGateway, times(1)).execute(any(JudgeContext.class));
         assertThat(finishedAtCaptor.getValue()).isNotNull();
     }
 
@@ -196,6 +210,9 @@ class JudgeServiceTest {
 
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.TLE);
+        assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isEqualTo(1000);
+        assertThat(runResult.memoryKb()).isNull();
         assertThat(runResult.caseResults()).singleElement().satisfies(caseResult -> {
             assertThat(caseResult.testCaseId()).isEqualTo(CASE_205);
             assertThat(caseResult.result()).isEqualTo(SubmissionResult.TLE);
@@ -259,6 +276,9 @@ class JudgeServiceTest {
 
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isEqualTo(2400);
+        assertThat(runResult.memoryKb()).isEqualTo(64);
         assertThat(runResult.caseResults()).singleElement().satisfies(caseResult -> {
             assertThat(caseResult.testCaseId()).isEqualTo(CASE_207);
             assertThat(caseResult.result()).isEqualTo(SubmissionResult.AC);
@@ -273,9 +293,9 @@ class JudgeServiceTest {
                 SUBMISSION_18,
                 "python",
                 List.of(
-                        hiddenTestCase(CASE_301, "1", "1"),
-                        hiddenTestCase(CASE_302, "2", "2"),
-                        hiddenTestCase(CASE_303, "3", "3")
+                        hiddenTestCase(CASE_301, 1, "1", "1"),
+                        hiddenTestCase(CASE_302, 2, "2", "2"),
+                        hiddenTestCase(CASE_303, 3, "3", "3")
                 )
         );
 
@@ -298,6 +318,9 @@ class JudgeServiceTest {
 
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.WA);
+        assertThat(runResult.failedTestcaseOrder()).isEqualTo(2);
+        assertThat(runResult.executionTimeMs()).isEqualTo(4);
+        assertThat(runResult.memoryKb()).isEqualTo(32);
         assertThat(runResult.caseResults()).hasSize(2);
         assertThat(runResult.caseResults().get(0).testCaseId()).isEqualTo(CASE_301);
         assertThat(runResult.caseResults().get(0).result()).isEqualTo(SubmissionResult.AC);
@@ -306,6 +329,87 @@ class JudgeServiceTest {
         assertThat(runResult.caseResults())
                 .extracting(CaseJudgeResult::testCaseId)
                 .doesNotContain(CASE_303);
+    }
+
+    @Test
+    void judge_keepsAcAfterAllHiddenCases_andAggregatesMaxExecutionTimeAndMemory() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_19,
+                "python",
+                List.of(
+                        hiddenTestCase(CASE_301, 1, "1", "1"),
+                        hiddenTestCase(CASE_302, 2, "2", "2"),
+                        hiddenTestCase(CASE_303, 3, "3", "3")
+                )
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_19)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
+                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 10, 100, false, false))
+                .thenReturn(new JudgeExecutionResult(true, "2\n", "", 0, 25, 64, false, false))
+                .thenReturn(new JudgeExecutionResult(true, "3\n", "", 0, 7, 512, false, false));
+
+        judgeService.judge(SUBMISSION_19);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(executionGateway, times(3)).execute(any(JudgeContext.class));
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_19), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isEqualTo(25);
+        assertThat(runResult.memoryKb()).isEqualTo(512);
+        assertThat(runResult.caseResults())
+                .extracting(CaseJudgeResult::testCaseOrder)
+                .containsExactly(1, 2, 3);
+        assertThat(runResult.caseResults())
+                .extracting(CaseJudgeResult::result)
+                .containsExactly(SubmissionResult.AC, SubmissionResult.AC, SubmissionResult.AC);
+    }
+
+    @Test
+    void judge_stopsWithMleWhenMemoryUsageExceedsProblemLimit() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_20,
+                "python",
+                List.of(
+                        hiddenTestCase(CASE_301, 1, "1", "1"),
+                        hiddenTestCase(CASE_302, 2, "2", "2")
+                )
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_20)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
+                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 8, 128 * 1024 + 1, false, false));
+
+        judgeService.judge(SUBMISSION_20);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(executionGateway, times(1)).execute(any(JudgeContext.class));
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_20), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.MLE);
+        assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
+        assertThat(runResult.executionTimeMs()).isEqualTo(8);
+        assertThat(runResult.memoryKb()).isEqualTo(128 * 1024 + 1);
+        assertThat(runResult.caseResults()).singleElement().satisfies(caseResult -> {
+            assertThat(caseResult.testCaseOrder()).isEqualTo(1);
+            assertThat(caseResult.result()).isEqualTo(SubmissionResult.MLE);
+        });
     }
 
     private static StartedJudging startedJudging(
@@ -326,5 +430,9 @@ class JudgeServiceTest {
 
     private static HiddenTestCaseSnapshot hiddenTestCase(UUID testCaseId, String input, String expectedOutput) {
         return new HiddenTestCaseSnapshot(testCaseId, input, expectedOutput);
+    }
+
+    private static HiddenTestCaseSnapshot hiddenTestCase(UUID testCaseId, int order, String input, String expectedOutput) {
+        return new HiddenTestCaseSnapshot(testCaseId, order, input, expectedOutput);
     }
 }

@@ -105,7 +105,7 @@ public class JudgeService {
 
             if (caseResult != SubmissionResult.AC) {
                 finalResult = caseResult;
-                failedTestcaseOrder = testCase.testCaseOrder();
+                failedTestcaseOrder = hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null;
                 break;
             }
         }
@@ -146,6 +146,13 @@ public class JudgeService {
         }
 
         return SubmissionResult.AC;
+    }
+
+    private boolean hasFailedTestcaseOrder(SubmissionResult result) {
+        return result == SubmissionResult.WA
+                || result == SubmissionResult.TLE
+                || result == SubmissionResult.RE
+                || result == SubmissionResult.MLE;
     }
 
     private boolean isMemoryLimitExceeded(JudgeExecutionResult executionResult, Integer memoryLimitMb) {

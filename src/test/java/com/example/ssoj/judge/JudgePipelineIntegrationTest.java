@@ -112,6 +112,9 @@ class JudgePipelineIntegrationTest {
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(7);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(256);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(caseResults).hasSize(1);
         assertThat(caseResults.get(0).getResult()).isEqualTo(SubmissionResult.AC);
@@ -156,7 +159,7 @@ class JudgePipelineIntegrationTest {
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
         fakeLanguageExecutor.setResults(
-                new JudgeExecutionResult(true, "1\n", "", 0, 5, 64, false, false),
+                new JudgeExecutionResult(true, "1\n", "", 0, 5, 128, false, false),
                 new JudgeExecutionResult(true, "wrong\n", "", 0, 6, 64, false, false),
                 new JudgeExecutionResult(true, "3\n", "", 0, 7, 64, false, false)
         );
@@ -171,7 +174,7 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.WA);
         assertThat(finishedSubmission.getFailedTestcaseOrder()).isEqualTo(2);
         assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(6);
-        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(64);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(caseResults).hasSize(2);
         assertThat(caseResults)
