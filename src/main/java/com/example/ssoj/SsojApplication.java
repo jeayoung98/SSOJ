@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -24,6 +25,8 @@ public class SsojApplication {
     }
 
     @Bean
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
     CommandLineRunner dataSourceConnectionCheck(DataSource dataSource) {
         return args -> {
             try (var connection = dataSource.getConnection()) {
@@ -38,7 +41,9 @@ public class SsojApplication {
     }
 
     @Bean
+    @ConditionalOnBean(StringRedisTemplate.class)
     @ConditionalOnProperty(name = "judge.dispatch.mode", havingValue = "redis", matchIfMissing = true)
+    @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
     CommandLineRunner redisConnectionCheck(StringRedisTemplate redisTemplate) {
         return args -> {
             try {

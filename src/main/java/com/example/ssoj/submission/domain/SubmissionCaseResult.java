@@ -12,7 +12,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.Getter;
 
+@Getter
 @Entity
 @Table(name = "submission_case_result")
 public class SubmissionCaseResult {
@@ -56,27 +58,4 @@ public class SubmissionCaseResult {
         this.memoryUsageKb = memoryUsageKb;
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public Submission getSubmission() {
-        return submission;
-    }
-
-    public TestCase getTestCase() {
-        return testCase;
-    }
-
-    public SubmissionStatus getStatus() {
-        return status;
-    }
-
-    public Integer getExecutionTimeMs() {
-        return executionTimeMs;
-    }
-
-    public Integer getMemoryUsageKb() {
-        return memoryUsageKb;
-    }
 }

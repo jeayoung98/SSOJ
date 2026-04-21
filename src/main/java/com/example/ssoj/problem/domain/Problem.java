@@ -6,7 +6,9 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import lombok.Getter;
 
+@Getter
 @Entity
 @Table(name = "problem")
 public class Problem {
@@ -30,23 +32,4 @@ public class Problem {
     protected Problem() {
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public Integer getTimeLimitMs() {
-        return timeLimitMs;
-    }
-
-    public Integer getMemoryLimitMb() {
-        return memoryLimitMb;
-    }
 }

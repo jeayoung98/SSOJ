@@ -12,9 +12,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.Getter;
 
 import java.time.Instant;
 
+@Getter
 @Entity
 @Table(name = "submission")
 public class Submission {
@@ -47,38 +49,6 @@ public class Submission {
     private Instant finishedAt;
 
     protected Submission() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Problem getProblem() {
-        return problem;
-    }
-
-    public String getLanguage() {
-        return language;
-    }
-
-    public String getSourceCode() {
-        return sourceCode;
-    }
-
-    public SubmissionStatus getStatus() {
-        return status;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getStartedAt() {
-        return startedAt;
-    }
-
-    public Instant getFinishedAt() {
-        return finishedAt;
     }
 
     public boolean isCompleted() {
