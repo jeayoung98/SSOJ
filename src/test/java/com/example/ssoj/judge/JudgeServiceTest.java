@@ -17,7 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -29,27 +28,27 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class JudgeServiceTest {
 
-    private static final UUID SUBMISSION_11 = UUID.fromString("00000000-0000-0000-0000-000000000011");
-    private static final UUID SUBMISSION_12 = UUID.fromString("00000000-0000-0000-0000-000000000012");
-    private static final UUID SUBMISSION_13 = UUID.fromString("00000000-0000-0000-0000-000000000013");
-    private static final UUID SUBMISSION_14 = UUID.fromString("00000000-0000-0000-0000-000000000014");
-    private static final UUID SUBMISSION_15 = UUID.fromString("00000000-0000-0000-0000-000000000015");
-    private static final UUID SUBMISSION_16 = UUID.fromString("00000000-0000-0000-0000-000000000016");
-    private static final UUID SUBMISSION_17 = UUID.fromString("00000000-0000-0000-0000-000000000017");
-    private static final UUID SUBMISSION_18 = UUID.fromString("00000000-0000-0000-0000-000000000018");
-    private static final UUID SUBMISSION_19 = UUID.fromString("00000000-0000-0000-0000-000000000019");
-    private static final UUID SUBMISSION_20 = UUID.fromString("00000000-0000-0000-0000-000000000020");
-    private static final UUID SUBMISSION_21 = UUID.fromString("00000000-0000-0000-0000-000000000021");
-    private static final UUID CASE_201 = UUID.fromString("00000000-0000-0000-0000-000000000201");
-    private static final UUID CASE_202 = UUID.fromString("00000000-0000-0000-0000-000000000202");
-    private static final UUID CASE_203 = UUID.fromString("00000000-0000-0000-0000-000000000203");
-    private static final UUID CASE_204 = UUID.fromString("00000000-0000-0000-0000-000000000204");
-    private static final UUID CASE_205 = UUID.fromString("00000000-0000-0000-0000-000000000205");
-    private static final UUID CASE_206 = UUID.fromString("00000000-0000-0000-0000-000000000206");
-    private static final UUID CASE_207 = UUID.fromString("00000000-0000-0000-0000-000000000207");
-    private static final UUID CASE_301 = UUID.fromString("00000000-0000-0000-0000-000000000301");
-    private static final UUID CASE_302 = UUID.fromString("00000000-0000-0000-0000-000000000302");
-    private static final UUID CASE_303 = UUID.fromString("00000000-0000-0000-0000-000000000303");
+    private static final Long SUBMISSION_11 = 11L;
+    private static final Long SUBMISSION_12 = 12L;
+    private static final Long SUBMISSION_13 = 13L;
+    private static final Long SUBMISSION_14 = 14L;
+    private static final Long SUBMISSION_15 = 15L;
+    private static final Long SUBMISSION_16 = 16L;
+    private static final Long SUBMISSION_17 = 17L;
+    private static final Long SUBMISSION_18 = 18L;
+    private static final Long SUBMISSION_19 = 19L;
+    private static final Long SUBMISSION_20 = 20L;
+    private static final Long SUBMISSION_21 = 21L;
+    private static final Long CASE_201 = 201L;
+    private static final Long CASE_202 = 202L;
+    private static final Long CASE_203 = 203L;
+    private static final Long CASE_204 = 204L;
+    private static final Long CASE_205 = 205L;
+    private static final Long CASE_206 = 206L;
+    private static final Long CASE_207 = 207L;
+    private static final Long CASE_301 = 301L;
+    private static final Long CASE_302 = 302L;
+    private static final Long CASE_303 = 303L;
 
     @Mock
     private JudgePersistenceService judgePersistenceService;
@@ -413,13 +412,13 @@ class JudgeServiceTest {
     }
 
     private static StartedJudging startedJudging(
-            UUID submissionId,
+            Long submissionId,
             String language,
             List<HiddenTestCaseSnapshot> hiddenTestCases
     ) {
         return new StartedJudging(
                 submissionId,
-                "problem-" + submissionId,
+                1L,
                 language,
                 "print('hello')",
                 1000,
@@ -428,11 +427,11 @@ class JudgeServiceTest {
         );
     }
 
-    private static HiddenTestCaseSnapshot hiddenTestCase(UUID testCaseId, String input, String expectedOutput) {
+    private static HiddenTestCaseSnapshot hiddenTestCase(Long testCaseId, String input, String expectedOutput) {
         return new HiddenTestCaseSnapshot(testCaseId, input, expectedOutput);
     }
 
-    private static HiddenTestCaseSnapshot hiddenTestCase(UUID testCaseId, int order, String input, String expectedOutput) {
+    private static HiddenTestCaseSnapshot hiddenTestCase(Long testCaseId, int order, String input, String expectedOutput) {
         return new HiddenTestCaseSnapshot(testCaseId, order, input, expectedOutput);
     }
 }

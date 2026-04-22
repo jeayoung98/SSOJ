@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
@@ -34,7 +33,7 @@ public class JudgePersistenceService {
     }
 
     @Transactional
-    public StartedJudging startJudging(UUID submissionId) {
+    public StartedJudging startJudging(Long submissionId) {
         Submission submission = submissionRepository.findByIdForUpdate(submissionId).orElse(null);
         if (submission == null) {
             log.warn("Submission {} does not exist", submissionId);
@@ -77,7 +76,7 @@ public class JudgePersistenceService {
     }
 
     @Transactional
-    public void saveResultsAndFinish(UUID submissionId, JudgeRunResult runResult, Instant judgedAt) {
+    public void saveResultsAndFinish(Long submissionId, JudgeRunResult runResult, Instant judgedAt) {
         Submission submission = submissionRepository.findById(submissionId).orElse(null);
         if (submission == null) {
             log.warn("Submission {} disappeared before saving judge result", submissionId);

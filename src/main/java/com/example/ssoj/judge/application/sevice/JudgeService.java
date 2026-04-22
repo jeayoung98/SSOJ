@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
@@ -34,7 +33,7 @@ public class JudgeService {
         this.executionGateway = executionGateway;
     }
 
-    public void judge(UUID submissionId) {
+    public void judge(Long submissionId) {
         StartedJudging startedJudging = judgePersistenceService.startJudging(submissionId);
         if (startedJudging == null) {
             return;

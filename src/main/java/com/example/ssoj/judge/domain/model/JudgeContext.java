@@ -1,10 +1,8 @@
 package com.example.ssoj.judge.domain.model;
 
-import java.util.UUID;
-
 public record JudgeContext(
-        UUID submissionId,
-        String problemId,
+        Long submissionId,
+        Long problemId,
         String language,
         String sourceCode,
         String input,

@@ -9,8 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.UUID;
-
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,7 +16,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CloudTasksJudgeDispatchServiceTest {
 
-    private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000123");
+    private static final Long SUBMISSION_ID = 123L;
 
     @Mock
     private CloudTasksGateway cloudTasksGateway;
@@ -42,7 +40,7 @@ class CloudTasksJudgeDispatchServiceTest {
                 "https://orchestrator.example/internal/judge-executions",
                 "worker@example.iam.gserviceaccount.com",
                 "https://orchestrator.example",
-                "{\"submissionId\":\"00000000-0000-0000-0000-000000000123\"}",
+                "{\"submissionId\":\"123\"}",
                 "req-1"
         )).thenReturn("projects/demo-project/locations/asia-northeast3/queues/judge-queue/tasks/task-1");
 
@@ -55,7 +53,7 @@ class CloudTasksJudgeDispatchServiceTest {
                 "https://orchestrator.example/internal/judge-executions",
                 "worker@example.iam.gserviceaccount.com",
                 "https://orchestrator.example",
-                "{\"submissionId\":\"00000000-0000-0000-0000-000000000123\"}",
+                "{\"submissionId\":\"123\"}",
                 "req-1"
         );
     }

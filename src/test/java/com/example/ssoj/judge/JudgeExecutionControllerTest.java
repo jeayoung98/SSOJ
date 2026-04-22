@@ -10,8 +10,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.util.UUID;
-
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -19,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class JudgeExecutionControllerTest {
 
-    private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000123");
+    private static final Long SUBMISSION_ID = 123L;
 
     @Mock
     private JudgeService judgeService;
@@ -38,7 +36,7 @@ class JudgeExecutionControllerTest {
         mockMvc.perform(post("/internal/judge-executions")
                         .contentType("application/json")
                         .content("""
-                                {"submissionId":"00000000-0000-0000-0000-000000000123"}
+                                {"submissionId":123}
                                 """))
                 .andExpect(status().isAccepted());
 

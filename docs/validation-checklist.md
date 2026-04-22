@@ -113,8 +113,8 @@ Check:
 
 - DB has the submission result columns used by `Submission`
 - production `ddl-auto` is `validate` or `none`
-- Cloud Tasks payload is UUID JSON
-- Redis local payload is plain UUID string
+- Cloud Tasks payload contains a Long `submissionId`
+- Redis local payload is a plain Long string
 - runner host has Docker daemon if Docker execution is used
 
 ## Archive Reference

@@ -1,16 +1,14 @@
 package com.example.ssoj.judge.domain.model;
 
-import java.util.UUID;
-
 public record HiddenTestCaseSnapshot(
-        UUID testCaseId,
+        Long testCaseId,
         Integer testCaseOrder,
         String input,
         String expectedOutput
 ) {
 
     public HiddenTestCaseSnapshot(
-            UUID testCaseId,
+            Long testCaseId,
             String input,
             String expectedOutput
     ) {

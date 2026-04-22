@@ -12,8 +12,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.util.UUID;
-
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -38,8 +36,8 @@ class RunnerExecutionControllerTest {
     @Test
     void execute_acceptsRunnerRequestAndReturnsRunnerResponse() throws Exception {
         RunnerExecutionRequest request = new RunnerExecutionRequest(
-                UUID.fromString("00000000-0000-0000-0000-000000000123"),
-                "456",
+                123L,
+                456L,
                 "python",
                 "print(1)",
                 "",
@@ -61,8 +59,8 @@ class RunnerExecutionControllerTest {
                         .contentType("application/json")
                         .content("""
                                 {
-                                  "submissionId": "00000000-0000-0000-0000-000000000123",
-                                  "problemId": "456",
+                                  "submissionId": 123,
+                                  "problemId": 456,
                                   "language": "python",
                                   "sourceCode": "print(1)",
                                   "input": "",

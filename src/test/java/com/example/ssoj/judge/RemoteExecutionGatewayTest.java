@@ -11,8 +11,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.UUID;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
@@ -25,7 +23,7 @@ class RemoteExecutionGatewayTest {
     @Test
     void execute_mapsRunnerResponseToJudgeExecutionResult() {
         RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
-        JudgeContext context = new JudgeContext(UUID.fromString("00000000-0000-0000-0000-000000000001"), "2", "java", "class Main {}", "1 2", 1000, 128);
+        JudgeContext context = new JudgeContext(1L, 2L, "java", "class Main {}", "1 2", 1000, 128);
 
         when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
                 .thenReturn(new RunnerExecutionResponse(
@@ -53,7 +51,7 @@ class RemoteExecutionGatewayTest {
     @Test
     void execute_returnsSystemErrorWhenRemoteClientFails() {
         RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
-        JudgeContext context = new JudgeContext(UUID.fromString("00000000-0000-0000-0000-000000000001"), "2", "python", "print(1)", "", 1000, 128);
+        JudgeContext context = new JudgeContext(1L, 2L, "python", "print(1)", "", 1000, 128);
 
         when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
                 .thenThrow(new IllegalStateException("runner unavailable"));

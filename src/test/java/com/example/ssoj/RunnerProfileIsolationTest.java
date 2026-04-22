@@ -52,8 +52,8 @@ class RunnerProfileIsolationTest {
                         .contentType("application/json")
                         .content("""
                                 {
-                                  "submissionId": "00000000-0000-0000-0000-000000000001",
-                                  "problemId": "1",
+                                  "submissionId": 1,
+                                  "problemId": 1,
                                   "language": "unsupported",
                                   "sourceCode": "print(1)",
                                   "input": "",

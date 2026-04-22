@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
-import java.util.UUID;
 
 @ConditionalOnProperty(name = "worker.enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnProperty(name = "worker.mode", havingValue = "redis-polling", matchIfMissing = true)
@@ -79,7 +78,7 @@ public class JudgeQueueConsumer {
         }
 
         try {
-            UUID submissionId = UUID.fromString(value);
+            Long submissionId = Long.parseLong(value);
             log.info("Received submissionId={} from Redis queue {}", submissionId, queueKey);
             executorService.submit(() -> {
                 try {

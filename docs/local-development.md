@@ -15,7 +15,7 @@ judge.execution.mode=docker
 Flow:
 
 ```text
-submissionId(UUID)
+submissionId(Long)
 -> Redis judge:queue
 -> JudgeQueueConsumer
 -> JudgeService
@@ -44,7 +44,7 @@ Redis enqueue:
 redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
 ```
 
-The queue payload is a plain UUID string, not JSON.
+The queue payload is a plain Long string, not JSON.
 
 ## Local Orchestrator/Runner Split
 

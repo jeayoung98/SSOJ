@@ -151,8 +151,8 @@ class OrchestratorRemoteRunnerIntegrationTest {
 
             String requestBody = new String(exchange.getRequestBody().readAllBytes());
             RunnerExecutionRequest request = new RunnerExecutionRequest(
-                    uuidField(requestBody, "submissionId"),
-                    stringField(requestBody, "problemId"),
+                    longField(requestBody, "submissionId"),
+                    longField(requestBody, "problemId"),
                     stringField(requestBody, "language"),
                     stringField(requestBody, "sourceCode"),
                     stringField(requestBody, "input"),
@@ -195,8 +195,8 @@ class OrchestratorRemoteRunnerIntegrationTest {
         return total;
     }
 
-    private static UUID uuidField(String json, String fieldName) {
-        return UUID.fromString(stringField(json, fieldName));
+    private static Long longField(String json, String fieldName) {
+        return Long.parseLong(numberToken(json, fieldName));
     }
 
     private static Integer intField(String json, String fieldName) {
@@ -254,7 +254,6 @@ class OrchestratorRemoteRunnerIntegrationTest {
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {
         Problem problem = instantiate(Problem.class);
-        ReflectionTestUtils.setField(problem, "id", UUID.randomUUID().toString());
         ReflectionTestUtils.setField(problem, "title", "A + B");
         ReflectionTestUtils.setField(problem, "difficulty", "EASY");
         ReflectionTestUtils.setField(problem, "description", "sum two numbers");

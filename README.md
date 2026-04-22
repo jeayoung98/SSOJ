@@ -50,8 +50,8 @@ The active JPA mappings use these tables:
 Important IDs:
 
 - `problems.id`: `String`
-- `submissions.id`: `UUID`
-- `problem_testcases.id`: `UUID`
+- `submissions.id`: `Long`
+- `problem_testcases.id`: `Long`
 
 Note: this repository does not add DDL/migration files. If an existing DB still
 has `submission_testcase_results`, dropping it is a code-external follow-up.

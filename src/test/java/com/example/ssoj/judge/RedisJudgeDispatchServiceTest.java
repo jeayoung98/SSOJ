@@ -9,15 +9,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import java.util.UUID;
-
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class RedisJudgeDispatchServiceTest {
 
-    private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000123");
+    private static final Long SUBMISSION_ID = 123L;
 
     @Mock
     private StringRedisTemplate redisTemplate;

@@ -4,11 +4,10 @@ import com.example.ssoj.testcase.domain.ProblemTestcase;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
-import java.util.UUID;
 
-public interface ProblemTestcaseRepository extends JpaRepository<ProblemTestcase, UUID> {
+public interface ProblemTestcaseRepository extends JpaRepository<ProblemTestcase, Long> {
 
-    List<ProblemTestcase> findAllByProblem_Id(String problemId);
+    List<ProblemTestcase> findAllByProblem_Id(Long problemId);
 
-    List<ProblemTestcase> findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(String problemId);
+    List<ProblemTestcase> findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(Long problemId);
 }

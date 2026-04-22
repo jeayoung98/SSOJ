@@ -19,7 +19,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -30,7 +29,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class JudgeQueueConsumerTest {
 
-    private static final UUID SUBMISSION_101 = UUID.fromString("00000000-0000-0000-0000-000000000101");
+    private static final Long SUBMISSION_101 = 101L;
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -84,7 +83,7 @@ class JudgeQueueConsumerTest {
 
         consumer.consume();
 
-        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(UUID.class));
+        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(Long.class));
         assertThat(semaphore.availablePermits()).isEqualTo(2);
     }
 
@@ -104,7 +103,7 @@ class JudgeQueueConsumerTest {
 
         consumer.consume();
 
-        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(UUID.class));
+        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(Long.class));
         assertThat(semaphore.availablePermits()).isEqualTo(2);
     }
 
@@ -122,7 +121,7 @@ class JudgeQueueConsumerTest {
         consumer.consume();
 
         verify(redisTemplate, never()).opsForList();
-        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(UUID.class));
+        verify(judgeService, never()).judge(org.mockito.ArgumentMatchers.any(Long.class));
     }
 
     @Test
@@ -143,8 +142,8 @@ class JudgeQueueConsumerTest {
 
         when(redisTemplate.opsForList()).thenReturn(listOperations);
         when(listOperations.leftPop("judge:queue")).thenReturn(
-                "00000000-0000-0000-0000-000000000201",
-                "00000000-0000-0000-0000-000000000202"
+                "201",
+                "202"
         );
 
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -154,7 +153,7 @@ class JudgeQueueConsumerTest {
             releaseWorkers.await(2, TimeUnit.SECONDS);
             runningCount.decrementAndGet();
             return null;
-        }).when(judgeService).judge(org.mockito.ArgumentMatchers.any(UUID.class));
+        }).when(judgeService).judge(org.mockito.ArgumentMatchers.any(Long.class));
 
         consumer.consume();
         consumer.consume();

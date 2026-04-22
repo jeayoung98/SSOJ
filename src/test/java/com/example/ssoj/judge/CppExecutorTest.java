@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,7 +66,7 @@ class CppExecutorTest {
     }
 
     private static JudgeContext context(String sourceCode) {
-        return new JudgeContext(UUID.fromString("00000000-0000-0000-0000-000000000001"), "10", "cpp", sourceCode, "1 2\n", 1000, 128);
+        return new JudgeContext(1L, 10L, "cpp", sourceCode, "1 2\n", 1000, 128);
     }
 
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {

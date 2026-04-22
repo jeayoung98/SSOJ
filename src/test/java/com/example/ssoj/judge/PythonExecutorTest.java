@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,8 +27,8 @@ class PythonExecutorTest {
         PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeExecutionResult result = pythonExecutor.execute(new JudgeContext(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                "10",
+                1L,
+                10L,
                 "python",
                 "print(1 + 2)",
                 "",

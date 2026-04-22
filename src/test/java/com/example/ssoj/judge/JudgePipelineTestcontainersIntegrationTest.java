@@ -121,7 +121,7 @@ class JudgePipelineTestcontainersIntegrationTest {
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
     }
 
-    private Submission awaitSubmission(UUID submissionId, SubmissionResult expectedResult, Duration timeout)
+    private Submission awaitSubmission(Long submissionId, SubmissionResult expectedResult, Duration timeout)
             throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
@@ -138,7 +138,6 @@ class JudgePipelineTestcontainersIntegrationTest {
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {
         Problem problem = instantiate(Problem.class);
-        ReflectionTestUtils.setField(problem, "id", UUID.randomUUID().toString());
         ReflectionTestUtils.setField(problem, "title", "A + B");
         ReflectionTestUtils.setField(problem, "difficulty", "EASY");
         ReflectionTestUtils.setField(problem, "description", "sum two numbers");

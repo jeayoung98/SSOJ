@@ -84,7 +84,7 @@ Web/API must create a `submissions` row before enqueue/dispatch.
 
 Required values:
 
-- `id`: UUID
+- `id`: Long
 - `user_id`: UUID
 - `problem_id`: `problems.id`
 - `language`
@@ -95,7 +95,7 @@ Required values:
 Redis local payload:
 
 ```text
-judge:queue -> UUID string
+judge:queue -> Long string
 ```
 
 Cloud Tasks payload:

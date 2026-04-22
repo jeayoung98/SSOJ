@@ -16,7 +16,6 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 
 import java.time.Instant;
-import java.util.UUID;
 
 @Getter
 @Entity
@@ -24,9 +23,9 @@ import java.util.UUID;
 public class Submission {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false)
-    private UUID id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)

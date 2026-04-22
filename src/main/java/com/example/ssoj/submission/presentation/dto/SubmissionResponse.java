@@ -8,9 +8,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record SubmissionResponse(
-        UUID id,
+        Long id,
         UUID userId,
-        String problemId,
+        Long problemId,
         String language,
         SubmissionStatus status,
         SubmissionResult result,
