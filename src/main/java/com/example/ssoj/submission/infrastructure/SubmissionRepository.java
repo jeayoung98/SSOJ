@@ -8,10 +8,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.UUID;
 
-public interface SubmissionRepository extends JpaRepository<Submission, Long> {
+public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select submission from Submission submission where submission.id = :id")
-    Optional<Submission> findByIdForUpdate(@Param("id") Long id);
+    Optional<Submission> findByIdForUpdate(@Param("id") UUID id);
 }

@@ -1,319 +1,87 @@
 # SSOJ
 
-SSOJ는 온라인 저지 플랫폼 MVP 프로젝트입니다.
+SSOJ는 온라인 저지 MVP를 위한 Spring Boot 기반 judge worker 저장소다. 현재 저장소에는 Next.js Web/API 소스가 없고, Spring worker와 실행/배포 설정만 포함한다.
 
-현재 저장소에는 Spring Boot 기반 judge worker가 구현되어 있으며, Redis queue를 통해 제출을 비동기로 받아 Docker 안에서 코드를 실행하고 결과를 PostgreSQL에 저장하는 구조를 사용합니다.
+## 현재 구현 요약
 
-## 프로젝트 개요
+- Web/API는 저장소 밖에 있으며, `submissions` row를 만든 뒤 `submissionId`를 Redis 또는 Cloud Tasks로 전달하는 상위 계층으로 전제한다.
+- Spring Boot는 `orchestrator`와 `runner` 역할을 profile/property로 나눈다.
+- 로컬 검증은 Redis polling과 Docker executor를 사용한다.
+- 배포형 orchestrator는 Cloud Tasks HTTP trigger와 remote runner 호출을 사용한다.
+- runner는 단일 실행 요청을 받고 Docker 기반 executor로 코드를 실행한다.
+- SSE는 현재 구현 범위에 없다.
 
-현재 아키텍처는 아래와 같습니다.
+## 핵심 흐름
 
-- Web / API: Next.js
-- Judge Worker: Spring Boot
-- Queue: Redis queue
-- DB: PostgreSQL
-- Sandbox: Docker
-
-역할 분리는 아래 기준입니다.
-
-- Next.js
-  - 문제 조회
-  - 코드 제출
-  - 제출 상태 / 결과 조회
-  - 제출 후 `submissionId`를 Redis queue에 push
-- Spring Boot Judge Worker
-  - Redis에서 `submissionId` consume
-  - `submission` 상태를 `PENDING -> JUDGING`로 변경
-  - hidden test case 기준으로 채점 수행
-  - 실행된 케이스 결과만 저장
-  - 최종 상태 반영
-
-## 현재 구현 범위
-
-현재 worker는 아래 범위까지 구현되어 있습니다.
-
-- Redis queue key `judge:queue` consume
-- `submissionId` 기반 비동기 채점 시작
-- JPA 엔티티 / 리포지토리 구성
-- `submission`, `problem`, `test_case`, `submission_case_result` 사용
-- hidden test case 순차 채점
-- 첫 실패 시 즉시 중단
-- 실행된 case까지만 `submission_case_result` 저장
-- 최종 `submission.status` 저장
-- `started_at`, `finished_at` 반영
-- 동시성 제한: 최대 2개 채점
-- Docker 기반 코드 실행
-- timeout / memory limit / cpu limit 적용
-- cleanup 보강
-
-현재 상태 enum은 아래를 사용합니다.
-
-- `PENDING`
-- `JUDGING`
-- `AC`
-- `WA`
-- `CE`
-- `RE`
-- `TLE`
-- `MLE`
-- `SYSTEM_ERROR`
-
-## 현재 지원 언어
-
-현재 worker 기준 지원 언어는 아래와 같습니다.
-
-- `cpp`
-- `java`
-- `python`
-
-언어별 실행 정책은 아래와 같습니다.
-
-### C++
-
-- 소스 파일명: `main.cpp`
-- compile: `g++ main.cpp -O2 -std=c++17 -o main`
-- run: `./main`
-- Docker image: `gcc:13`
-
-### Java
-
-- 소스 파일명: `Main.java`
-- compile: `javac Main.java`
-- run: `java Main`
-- Docker image: `eclipse-temurin:17-jdk`
-
-### Python
-
-- 소스 파일명: `main.py`
-- run: `python3 main.py`
-- Docker image: `python:3.11`
-
-## 출력 비교 정책
-
-현재 MVP 정책은 아래와 같습니다.
-
-- 전체 출력 trim
-- 줄 단위 분리
-- 각 줄 trim
-- line-by-line 비교
-- trailing newline 차이는 무시
-
-## 기술 스택
-
-- Java 17
-- Spring Boot
-- Spring Data JPA
-- Spring Data Redis
-- PostgreSQL
-- Redis
-- Docker
-- Gradle
-
-## 실행 전 준비사항
-
-아래 항목이 필요합니다.
-
-- JDK 17 이상
-- Docker
-- Redis
-- PostgreSQL
-
-## 환경 변수
-
-### DB
-
-PostgreSQL 연결은 아래 환경 변수를 사용합니다.
-
-- `SPRING_DATASOURCE_URL`
-- `SPRING_DATASOURCE_USERNAME`
-- `SPRING_DATASOURCE_PASSWORD`
-
-예시:
-
-```powershell
-$env:SPRING_DATASOURCE_URL="jdbc:postgresql://YOUR_DB_HOST:5432/ssoj"
-$env:SPRING_DATASOURCE_USERNAME="YOUR_DB_USERNAME"
-$env:SPRING_DATASOURCE_PASSWORD="YOUR_DB_PASSWORD"
+```text
+submission 생성
+-> submissionId 전달
+-> JudgeService
+-> hidden problem_testcases를 testcase_order 순서로 실행
+-> 첫 실패(WA/TLE/RE/MLE)에서 즉시 종료
+-> 실행된 testcase까지만 submission_testcase_results 저장
+-> submissions.status=DONE
+-> result, failed_testcase_order, execution_time_ms, memory_kb, judged_at 저장
 ```
 
-### Redis
+AC인 경우 `failed_testcase_order`는 `null`이다. CE와 SYSTEM_ERROR도 현재 코드 기준으로 특정 testcase 실패로 노출하지 않으므로 `failed_testcase_order=null`이다.
 
-Redis 연결은 아래 환경 변수를 사용합니다.
+## DB 기준
 
-- `SPRING_DATA_REDIS_HOST`
-- `SPRING_DATA_REDIS_PORT`
+현재 JPA 매핑은 기존 Supabase PostgreSQL 스키마를 따르는 것을 전제로 한다.
 
-기본값:
+- `users`
+- `problems`
+- `problem_examples`
+- `problem_testcases`
+- `submissions`
+- `submission_testcase_results`
 
-- `SPRING_DATA_REDIS_HOST=localhost`
-- `SPRING_DATA_REDIS_PORT=6379`
+중요 타입:
 
-예시:
+- `problems.id`: `String`
+- `submissions.id`: `UUID`
+- `problem_testcases.id`: `UUID`
+- `submission_testcase_results.id`: `UUID`
 
-```powershell
-$env:SPRING_DATA_REDIS_HOST="localhost"
-$env:SPRING_DATA_REDIS_PORT="6379"
-```
+주의: 현재 코드에는 `submissions.failed_testcase_order` 매핑이 있다. 기존 DB에 이 컬럼이 없다면 `spring.jpa.hibernate.ddl-auto=validate`에서 실패한다. 이 저장소에서는 DDL/migration을 작성하지 않는다.
 
-## 로컬 실행 방법
+## 실행 모드
 
-### 1. Redis 실행
+| 목적 | profile/property | 설명 |
+| --- | --- | --- |
+| 로컬 worker | `SPRING_PROFILES_ACTIVE=local` | Redis polling + Docker execution |
+| 배포 orchestrator | `SPRING_PROFILES_ACTIVE=remote` | HTTP trigger + Cloud Tasks + remote runner |
+| 실행 runner | `SPRING_PROFILES_ACTIVE=runner` | DB/Redis 없이 단일 실행 요청 처리 |
 
-예시:
+## 빠른 실행
 
-```powershell
-docker run --rm -p 6379:6379 redis:7-alpine
-```
-
-### 2. 필요한 환경 변수 설정
-
-```powershell
-$env:SPRING_DATASOURCE_URL="jdbc:postgresql://YOUR_DB_HOST:5432/ssoj"
-$env:SPRING_DATASOURCE_USERNAME="YOUR_DB_USERNAME"
-$env:SPRING_DATASOURCE_PASSWORD="YOUR_DB_PASSWORD"
-$env:SPRING_DATA_REDIS_HOST="localhost"
-$env:SPRING_DATA_REDIS_PORT="6379"
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-```
-
-### 3. 애플리케이션 실행
+로컬:
 
 ```powershell
-.\gradlew.bat bootRun
+.\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
-### 4. 시작 후 기본 확인
-
-기동 후에는 worker가 오류 없이 올라오는지 확인하고, enqueue 후 아래 로그 흐름이 보이는지 확인합니다.
-
-- `Received submissionId=123 from Redis queue judge:queue`
-- `Submission 123 changed from PENDING to JUDGING`
-- `Submission 123 finished with status=...`
-
-## Redis queue 테스트
-
-Redis queue key는 아래를 사용합니다.
-
-- `judge:queue`
-
-Payload는 아래 형식입니다.
-
-- `submissionId` 하나만 사용
-
-예시:
+Redis enqueue:
 
 ```powershell
-redis-cli LPUSH judge:queue 123
+redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
 ```
 
-## Docker 실행 정책
-
-현재 Docker 실행 시 아래 옵션을 사용합니다.
-
-- `--rm`
-- `--network none`
-- `-m <memoryLimitMb>m`
-- `--cpus 1`
-- `-v <host-workspace>:/workspace`
-- `-w /workspace`
-
-## 현재 제약 사항
-
-현재 프로젝트는 MVP 단계이며, 아래는 아직 범위 밖입니다.
-
-- ranking
-- plagiarism check
-- multi-region deployment
-- advanced sandbox hardening
-- autoscaling
-- SSE / realtime push
-
-또한 현재 구현은 worker 중심이며, 전체 Next.js 서비스와의 실제 통합 검증은 별도 확인이 필요합니다.
-
-## Docker Compose
-
-현재 저장소에는 아래 파일이 포함되어 있습니다.
-
-- `Dockerfile`
-- `docker-compose.yml`
-
-`docker-compose.yml`은 Redis와 judge worker를 함께 띄우는 용도로 사용할 수 있습니다.
-
-예시:
+테스트:
 
 ```powershell
-docker compose up --build
+.\gradlew.bat test
 ```
 
-## 모드 설정
+## 문서 구조
 
-현재 worker는 local 경로와 remote 경로를 설정으로 구분할 수 있습니다.
+실사용 문서는 아래 5개를 기준으로 본다.
 
-설정 역할:
+- [아키텍처](docs/architecture.md)
+- [로컬 개발](docs/local-development.md)
+- [배포](docs/deployment.md)
+- [채점 모델](docs/judging-model.md)
+- [검증 체크리스트](docs/validation-checklist.md)
 
-- `worker.mode`
-  - judge 실행 진입점을 결정합니다.
-  - `redis-polling`: `JudgeQueueConsumer` 사용
-  - `http-trigger`: `JudgeExecutionController` 사용
-- `judge.dispatch.mode`
-  - `submissionId`를 worker 쪽으로 전달하는 dispatch 구현을 결정합니다.
-  - `redis`: Redis queue 사용
-  - `cloud-tasks`: 운영 경로용 확장 포인트
-- `judge.execution.mode`
-  - 실제 코드 실행 방식을 결정합니다.
-  - `docker`: 로컬 Docker executor 사용
-  - `remote`: HTTP 기반 remote runner 사용
-
-- local 조합
-  - `worker.mode=redis-polling`
-  - `judge.dispatch.mode=redis`
-  - `judge.execution.mode=docker`
-- remote 조합
-  - `worker.mode=http-trigger`
-  - `judge.dispatch.mode=cloud-tasks`
-  - `judge.execution.mode=remote`
-
-예시 프로필 파일:
-
-- `src/main/resources/application-local.properties`
-- `src/main/resources/application-remote.properties`
-
-현재 코드 기준 동작은 아래와 같습니다.
-
-- local 모드
-  - Redis polling consumer 활성화
-  - Docker execution 경로 사용
-- remote 모드
-  - Redis polling consumer 비활성화
-  - 내부 HTTP trigger + remote execution 경로 사용
-  - Cloud Tasks dispatch는 구현 선택 구조만 준비되어 있고 실제 호출은 아직 미구현
-
-상세 설명은 [Judge Worker 모드 설정](./docs/worker-mode-configuration.md)을 참고하면 됩니다.
-
-## 관련 문서
-
-상세 문서는 `docs/` 아래에 정리되어 있습니다.
-
-- [Judge Worker 문서](./docs/judge-worker.md)
-- [Judge Worker 모드 설정](./docs/worker-mode-configuration.md)
-- [현재 아키텍처 vs 검토 중 아키텍처](./docs/current-vs-target-architecture.md)
-- [Cloud Run 기반 채점 구조 검토](./docs/cloud-run-architecture-review.md)
-- [JudgeService 개선 정리](./docs/judge-service-improvements.md)
-- [Judge Worker E2E 시나리오](./docs/judge-worker-e2e.md)
-- [Judge Worker 검증 체크리스트](./docs/worker-validation-checklist.md)
-- [Next.js와 Spring Worker 연동 체크리스트](./docs/nextjs-spring-worker-checklist.md)
-- [Judge Worker 동시성 점검](./docs/judge-worker-concurrency-check.md)
-- [Judge Worker Cleanup 점검](./docs/judge-worker-cleanup-check.md)
-- [Judge Worker 데모 스크립트](./docs/judge-worker-demo-script.md)
-- [C++ Docker 채점 검증](./docs/cpp-docker-judge-check.md)
-
-## 현재 상태 요약
-
-현재 judge worker는 로컬 MVP 검증이 가능한 수준까지 구현되어 있습니다.
-
-다만 아래는 추가 확인이 필요합니다.
-
-- Java / Python / C++ 실제 end-to-end 상태별 검증
-- Next.js 제출 API와의 실제 연동 검증
-- PostgreSQL / Redis / Docker Compose 기준 실제 배포 환경 검증
+기존 세부 메모와 이전 점검 문서는 [docs/archive](docs/archive/)에 보관한다. archive 문서는 이력 참고용이며, 현재 기준은 위 핵심 문서가 우선이다.

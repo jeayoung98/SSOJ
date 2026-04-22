@@ -5,10 +5,10 @@ import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.domain.model.StartedJudging;
 import com.example.ssoj.submission.domain.Submission;
-import com.example.ssoj.submission.domain.SubmissionCaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionCaseResultRepository;
+import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
+import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
-import com.example.ssoj.testcase.infrastructure.TestCaseRepository;
+import com.example.ssoj.testcase.infrastructure.ProblemTestcaseRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
@@ -25,21 +26,21 @@ public class JudgePersistenceService {
     private static final Logger log = LoggerFactory.getLogger(JudgePersistenceService.class);
 
     private final SubmissionRepository submissionRepository;
-    private final TestCaseRepository testCaseRepository;
-    private final SubmissionCaseResultRepository submissionCaseResultRepository;
+    private final ProblemTestcaseRepository problemTestcaseRepository;
+    private final SubmissionTestcaseResultRepository submissionTestcaseResultRepository;
 
     public JudgePersistenceService(
             SubmissionRepository submissionRepository,
-            TestCaseRepository testCaseRepository,
-            SubmissionCaseResultRepository submissionCaseResultRepository
+            ProblemTestcaseRepository problemTestcaseRepository,
+            SubmissionTestcaseResultRepository submissionTestcaseResultRepository
     ) {
         this.submissionRepository = submissionRepository;
-        this.testCaseRepository = testCaseRepository;
-        this.submissionCaseResultRepository = submissionCaseResultRepository;
+        this.problemTestcaseRepository = problemTestcaseRepository;
+        this.submissionTestcaseResultRepository = submissionTestcaseResultRepository;
     }
 
     @Transactional
-    public StartedJudging startJudging(Long submissionId) {
+    public StartedJudging startJudging(UUID submissionId) {
         Submission submission = submissionRepository.findByIdForUpdate(submissionId).orElse(null);
         if (submission == null) {
             log.warn("Submission {} does not exist", submissionId);
@@ -51,19 +52,20 @@ public class JudgePersistenceService {
             return null;
         }
 
-        boolean updated = submission.markAsJudging(Instant.now());
+        boolean updated = submission.markAsJudging();
         if (!updated) {
             log.info("Submission {} is ignored because current status={}", submissionId, submission.getStatus());
             return null;
         }
 
-        List<HiddenTestCaseSnapshot> hiddenTestCases = testCaseRepository
-                .findAllByProblem_IdAndHiddenTrueOrderByIdAsc(submission.getProblem().getId())
+        List<HiddenTestCaseSnapshot> hiddenTestCases = problemTestcaseRepository
+                .findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(submission.getProblem().getId())
                 .stream()
-                .map(testCase -> new HiddenTestCaseSnapshot(
-                        testCase.getId(),
-                        testCase.getInput(),
-                        testCase.getOutput()
+                .map(testcase -> new HiddenTestCaseSnapshot(
+                        testcase.getId(),
+                        testcase.getTestcaseOrder(),
+                        testcase.getInputText(),
+                        testcase.getExpectedOutput()
                 ))
                 .toList();
 
@@ -81,7 +83,7 @@ public class JudgePersistenceService {
     }
 
     @Transactional
-    public void saveResultsAndFinish(Long submissionId, JudgeRunResult runResult, Instant finishedAt) {
+    public void saveResultsAndFinish(UUID submissionId, JudgeRunResult runResult, Instant judgedAt) {
         Submission submission = submissionRepository.findById(submissionId).orElse(null);
         if (submission == null) {
             log.warn("Submission {} disappeared before saving judge result", submissionId);
@@ -89,16 +91,23 @@ public class JudgePersistenceService {
         }
 
         for (CaseJudgeResult caseResult : runResult.caseResults()) {
-            submissionCaseResultRepository.save(new SubmissionCaseResult(
+            submissionTestcaseResultRepository.save(new SubmissionTestcaseResult(
                     submission,
-                    testCaseRepository.getReferenceById(caseResult.testCaseId()),
-                    caseResult.status(),
+                    problemTestcaseRepository.getReferenceById(caseResult.testCaseId()),
+                    caseResult.result(),
                     caseResult.executionTimeMs(),
-                    caseResult.memoryUsageKb()
+                    caseResult.memoryKb(),
+                    caseResult.errorMessage()
             ));
         }
 
-        submission.finish(runResult.finalStatus(), finishedAt);
-        log.info("Submission {} finished with status={}", submissionId, runResult.finalStatus());
+        submission.finish(
+                runResult.finalResult(),
+                runResult.executionTimeMs(),
+                runResult.memoryKb(),
+                runResult.failedTestcaseOrder(),
+                judgedAt
+        );
+        log.info("Submission {} finished with result={}", submissionId, runResult.finalResult());
     }
 }

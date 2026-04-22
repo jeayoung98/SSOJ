@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -30,8 +32,8 @@ class HttpRemoteExecutionClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().json("""
                         {
-                          "submissionId": 11,
-                          "problemId": 22,
+                          "submissionId": "00000000-0000-0000-0000-000000000011",
+                          "problemId": "22",
                           "language": "java",
                           "sourceCode": "class Main {}",
                           "input": "1 2",
@@ -53,8 +55,8 @@ class HttpRemoteExecutionClientTest {
                         """, MediaType.APPLICATION_JSON));
 
         RunnerExecutionResponse response = client.execute(new RunnerExecutionRequest(
-                11L,
-                22L,
+                UUID.fromString("00000000-0000-0000-0000-000000000011"),
+                "22",
                 "java",
                 "class Main {}",
                 "1 2",

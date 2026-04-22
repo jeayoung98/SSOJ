@@ -14,8 +14,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Component
 public class DockerProcessExecutor {
@@ -52,15 +52,10 @@ public class DockerProcessExecutor {
         Process process = null;
         try {
             log.info(
-                    "Starting Docker execution for submission {} language={} image={} containerCommand={} workspaceDirectory={} workspaceExists={} workspaceEntries={} dockerCommand={}",
+                    "Starting Docker execution for submission {} with image={} command={}",
                     context.submissionId(),
-                    context.language(),
                     dockerImage,
-                    containerCommand,
-                    workspaceDirectory.toAbsolutePath(),
-                    Files.exists(workspaceDirectory),
-                    listWorkspaceEntries(workspaceDirectory),
-                    command
+                    containerCommand
             );
             Instant startedAt = Instant.now();
             process = new ProcessBuilder(command).start();
@@ -114,31 +109,7 @@ public class DockerProcessExecutor {
         }
     }
 
-    private List<String> listWorkspaceEntries(Path workspaceDirectory) {
-        if (!Files.exists(workspaceDirectory)) {
-            return List.of();
-        }
-
-        try (var paths = Files.list(workspaceDirectory)) {
-            return paths
-                    .limit(20)
-                    .map(this::describePath)
-                    .collect(Collectors.toList());
-        } catch (IOException exception) {
-            log.warn("Failed to list workspace directory {}", workspaceDirectory, exception);
-            return List.of("<failed to list workspace: " + exception.getMessage() + ">");
-        }
-    }
-
-    private String describePath(Path path) {
-        try {
-            return path.getFileName() + "(exists=" + Files.exists(path) + ",size=" + Files.size(path) + ")";
-        } catch (IOException exception) {
-            return path.getFileName() + "(exists=" + Files.exists(path) + ",size=unknown,error=" + exception.getMessage() + ")";
-        }
-    }
-
-    private void cleanupContainer(Long submissionId, Path cidFile) {
+    private void cleanupContainer(UUID submissionId, Path cidFile) {
         if (!Files.exists(cidFile)) {
             return;
         }

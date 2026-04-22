@@ -1,6 +1,6 @@
 package com.example.ssoj.judge.application.sevice;
 
-import com.example.ssoj.submission.domain.SubmissionStatus;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import com.example.ssoj.judge.application.port.ExecutionGateway;
 import com.example.ssoj.judge.domain.model.CaseJudgeResult;
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @ConditionalOnProperty(name = "worker.role", havingValue = "orchestrator", matchIfMissing = true)
@@ -34,7 +35,7 @@ public class JudgeService {
         this.executionGateway = executionGateway;
     }
 
-    public void judge(Long submissionId) {
+    public void judge(UUID submissionId) {
         StartedJudging startedJudging = judgePersistenceService.startJudging(submissionId);
         if (startedJudging == null) {
             return;
@@ -63,11 +64,14 @@ public class JudgeService {
         List<HiddenTestCaseSnapshot> hiddenTestCases = startedJudging.hiddenTestCases();
         if (hiddenTestCases.isEmpty()) {
             log.info("Submission {} has no hidden test cases. Finishing with AC.", startedJudging.submissionId());
-            return new JudgeRunResult(List.of(), SubmissionStatus.AC);
+            return new JudgeRunResult(List.of(), SubmissionResult.AC, null, null);
         }
 
         List<CaseJudgeResult> caseResults = new java.util.ArrayList<>();
-        SubmissionStatus finalStatus = SubmissionStatus.AC;
+        SubmissionResult finalResult = SubmissionResult.AC;
+        Integer maxExecutionTimeMs = null;
+        Integer maxMemoryKb = null;
+        Integer failedTestcaseOrder = null;
 
         for (HiddenTestCaseSnapshot testCase : hiddenTestCases) {
             JudgeContext context = new JudgeContext(
@@ -81,52 +85,86 @@ public class JudgeService {
             );
 
             JudgeExecutionResult executionResult = executionGateway.execute(context);
-            SubmissionStatus caseStatus = determineCaseStatus(startedJudging.language(), executionResult, testCase.expectedOutput());
+            SubmissionResult caseResult = determineCaseResult(
+                    startedJudging.language(),
+                    executionResult,
+                    testCase.expectedOutput(),
+                    startedJudging.memoryLimitMb()
+            );
+            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
+            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
 
             caseResults.add(new CaseJudgeResult(
                     testCase.testCaseId(),
-                    caseStatus,
+                    testCase.testCaseOrder(),
+                    caseResult,
                     executionResult.executionTimeMs(),
-                    executionResult.memoryUsageKb()
+                    executionResult.memoryUsageKb(),
+                    executionResult.stderr()
             ));
 
-            if (caseStatus != SubmissionStatus.AC) {
-                finalStatus = caseStatus;
+            if (caseResult != SubmissionResult.AC) {
+                finalResult = caseResult;
+                failedTestcaseOrder = hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null;
                 break;
             }
         }
 
-        return new JudgeRunResult(caseResults, finalStatus);
+        return new JudgeRunResult(caseResults, finalResult, maxExecutionTimeMs, maxMemoryKb, failedTestcaseOrder);
     }
 
-    private SubmissionStatus determineCaseStatus(
+    private SubmissionResult determineCaseResult(
             String language,
             JudgeExecutionResult executionResult,
-            String expectedOutput
+            String expectedOutput,
+            Integer memoryLimitMb
     ) {
         if (executionResult.systemError()) {
-            return SubmissionStatus.SYSTEM_ERROR;
+            return SubmissionResult.SYSTEM_ERROR;
         }
 
         if (executionResult.timedOut()) {
-            return SubmissionStatus.TLE;
+            return SubmissionResult.TLE;
+        }
+
+        if (isMemoryLimitExceeded(executionResult, memoryLimitMb)) {
+            return SubmissionResult.MLE;
         }
 
         if (!executionResult.success()) {
             if ("java".equalsIgnoreCase(language)
                     && executionResult.stderr() != null
                     && executionResult.stderr().contains("error:")) {
-                return SubmissionStatus.CE;
+                return SubmissionResult.CE;
             }
 
-            return SubmissionStatus.RE;
+            return SubmissionResult.RE;
         }
 
         if (!matchesExpectedOutput(executionResult.stdout(), expectedOutput)) {
-            return SubmissionStatus.WA;
+            return SubmissionResult.WA;
         }
 
-        return SubmissionStatus.AC;
+        return SubmissionResult.AC;
+    }
+
+    private boolean hasFailedTestcaseOrder(SubmissionResult result) {
+        return result == SubmissionResult.WA
+                || result == SubmissionResult.TLE
+                || result == SubmissionResult.RE
+                || result == SubmissionResult.MLE;
+    }
+
+    private boolean isMemoryLimitExceeded(JudgeExecutionResult executionResult, Integer memoryLimitMb) {
+        if (memoryLimitMb == null) {
+            return false;
+        }
+
+        if (executionResult.memoryUsageKb() != null) {
+            return executionResult.memoryUsageKb() > memoryLimitMb * 1024;
+        }
+
+        return Integer.valueOf(137).equals(executionResult.exitCode());
     }
 
     private boolean matchesExpectedOutput(String actualOutput, String expectedOutput) {
@@ -143,5 +181,15 @@ public class JudgeService {
         return Arrays.stream(output.trim().split("\\R"))
                 .map(String::trim)
                 .toList();
+    }
+
+    private Integer max(Integer current, Integer candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null) {
+            return candidate;
+        }
+        return Math.max(current, candidate);
     }
 }

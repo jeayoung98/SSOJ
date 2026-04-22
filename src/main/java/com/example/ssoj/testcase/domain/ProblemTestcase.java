@@ -10,48 +10,36 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.Getter;
 
+import java.util.UUID;
+
+@Getter
 @Entity
-@Table(name = "test_case")
-public class TestCase {
+@Table(name = "problem_testcases")
+public class ProblemTestcase {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(nullable = false)
+    private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "problem_id", nullable = false)
     private Problem problem;
 
-    @Column(nullable = false, columnDefinition = "text")
-    private String input;
+    @Column(name = "testcase_order", nullable = false)
+    private Integer testcaseOrder;
 
-    @Column(nullable = false, columnDefinition = "text")
-    private String output;
+    @Column(name = "input_text", nullable = false, columnDefinition = "text")
+    private String inputText;
+
+    @Column(name = "expected_output", nullable = false, columnDefinition = "text")
+    private String expectedOutput;
 
     @Column(name = "is_hidden", nullable = false)
     private boolean hidden;
 
-    protected TestCase() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Problem getProblem() {
-        return problem;
-    }
-
-    public String getInput() {
-        return input;
-    }
-
-    public String getOutput() {
-        return output;
-    }
-
-    public boolean isHidden() {
-        return hidden;
+    protected ProblemTestcase() {
     }
 }

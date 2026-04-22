@@ -3,12 +3,15 @@ package com.example.ssoj.judge;
 import com.example.ssoj.problem.domain.Problem;
 import com.example.ssoj.problem.infrastructure.ProblemRepository;
 import com.example.ssoj.submission.domain.Submission;
-import com.example.ssoj.submission.domain.SubmissionCaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionCaseResultRepository;
+import com.example.ssoj.submission.domain.SubmissionResult;
+import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
+import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.submission.domain.SubmissionStatus;
-import com.example.ssoj.testcase.domain.TestCase;
-import com.example.ssoj.testcase.infrastructure.TestCaseRepository;
+import com.example.ssoj.testcase.domain.ProblemTestcase;
+import com.example.ssoj.testcase.infrastructure.ProblemTestcaseRepository;
+import com.example.ssoj.user.domain.User;
+import com.example.ssoj.user.infrastructure.UserRepository;
 import com.example.ssoj.judge.application.sevice.JudgeQueueConsumer;
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
@@ -35,6 +38,7 @@ import java.lang.reflect.Constructor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,13 +76,16 @@ class JudgePipelineTestcontainersIntegrationTest {
     private ProblemRepository problemRepository;
 
     @Autowired
-    private TestCaseRepository testCaseRepository;
+    private ProblemTestcaseRepository testCaseRepository;
 
     @Autowired
     private SubmissionRepository submissionRepository;
 
     @Autowired
-    private SubmissionCaseResultRepository submissionCaseResultRepository;
+    private UserRepository userRepository;
+
+    @Autowired
+    private SubmissionTestcaseResultRepository submissionCaseResultRepository;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -93,6 +100,7 @@ class JudgePipelineTestcontainersIntegrationTest {
     void tearDown() {
         submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
+        userRepository.deleteAll();
         testCaseRepository.deleteAll();
         problemRepository.deleteAll();
         fakeLanguageExecutor.reset();
@@ -101,30 +109,31 @@ class JudgePipelineTestcontainersIntegrationTest {
     @Test
     void consume_readsRedisQueueAndPersistsResultsAgainstRealRedisAndPostgres() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
+        User user = userRepository.save(user());
         testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
-        Submission submission = submissionRepository.save(submission(problem, "fake", "print()", SubmissionStatus.PENDING));
+        Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
         fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 11, 128, false, false));
 
         stringRedisTemplate.opsForList().leftPush(QUEUE_KEY, submission.getId().toString());
         judgeQueueConsumer.consume();
 
-        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionStatus.AC, Duration.ofSeconds(5));
-        List<SubmissionCaseResult> caseResults = submissionCaseResultRepository.findAll();
+        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.AC, Duration.ofSeconds(5));
+        List<SubmissionTestcaseResult> caseResults = submissionCaseResultRepository.findAll();
 
-        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.AC);
-        assertThat(finishedSubmission.getStartedAt()).isNotNull();
-        assertThat(finishedSubmission.getFinishedAt()).isNotNull();
+        assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
+        assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(caseResults).hasSize(1);
-        assertThat(caseResults.get(0).getStatus()).isEqualTo(SubmissionStatus.AC);
+        assertThat(caseResults.get(0).getResult()).isEqualTo(SubmissionResult.AC);
     }
 
-    private Submission awaitSubmission(Long submissionId, SubmissionStatus expectedStatus, Duration timeout)
+    private Submission awaitSubmission(UUID submissionId, SubmissionResult expectedResult, Duration timeout)
             throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
             Submission submission = submissionRepository.findById(submissionId).orElseThrow();
-            if (submission.getStatus() == expectedStatus) {
+            if (submission.getResult() == expectedResult) {
                 return submission;
             }
             Thread.sleep(100);
@@ -136,29 +145,41 @@ class JudgePipelineTestcontainersIntegrationTest {
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {
         Problem problem = instantiate(Problem.class);
+        ReflectionTestUtils.setField(problem, "id", UUID.randomUUID().toString());
         ReflectionTestUtils.setField(problem, "title", "A + B");
+        ReflectionTestUtils.setField(problem, "difficulty", "EASY");
         ReflectionTestUtils.setField(problem, "description", "sum two numbers");
         ReflectionTestUtils.setField(problem, "timeLimitMs", timeLimitMs);
         ReflectionTestUtils.setField(problem, "memoryLimitMb", memoryLimitMb);
         return problem;
     }
 
-    private static TestCase testCase(Problem problem, String input, String output, boolean hidden) {
-        TestCase testCase = instantiate(TestCase.class);
+    private static User user() {
+        User user = instantiate(User.class);
+        ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(user, "nickname", "tester");
+        ReflectionTestUtils.setField(user, "role", "USER");
+        return user;
+    }
+
+    private static ProblemTestcase testCase(Problem problem, String input, String output, boolean hidden) {
+        ProblemTestcase testCase = instantiate(ProblemTestcase.class);
         ReflectionTestUtils.setField(testCase, "problem", problem);
-        ReflectionTestUtils.setField(testCase, "input", input);
-        ReflectionTestUtils.setField(testCase, "output", output);
+        ReflectionTestUtils.setField(testCase, "testcaseOrder", 1);
+        ReflectionTestUtils.setField(testCase, "inputText", input);
+        ReflectionTestUtils.setField(testCase, "expectedOutput", output);
         ReflectionTestUtils.setField(testCase, "hidden", hidden);
         return testCase;
     }
 
-    private static Submission submission(Problem problem, String language, String sourceCode, SubmissionStatus status) {
+    private static Submission submission(User user, Problem problem, String language, String sourceCode, SubmissionStatus status) {
         Submission submission = instantiate(Submission.class);
+        ReflectionTestUtils.setField(submission, "user", user);
         ReflectionTestUtils.setField(submission, "problem", problem);
         ReflectionTestUtils.setField(submission, "language", language);
         ReflectionTestUtils.setField(submission, "sourceCode", sourceCode);
         ReflectionTestUtils.setField(submission, "status", status);
-        ReflectionTestUtils.setField(submission, "createdAt", Instant.now());
+        ReflectionTestUtils.setField(submission, "submittedAt", Instant.now());
         return submission;
     }
 

@@ -32,7 +32,7 @@ public class CloudTasksJudgeDispatchService implements JudgeDispatchPort {
     public void dispatch(JudgeDispatchCommand command) {
         validateConfiguration();
 
-        String payloadJson = "{\"submissionId\":%d}".formatted(command.submissionId());
+        String payloadJson = "{\"submissionId\":\"%s\"}".formatted(command.submissionId());
         String taskName = cloudTasksGateway.createHttpTask(
                 properties.projectId(),
                 properties.location(),
