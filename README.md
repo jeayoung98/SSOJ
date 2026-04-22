@@ -1,62 +1,64 @@
 # SSOJ
 
-SSOJ는 온라인 저지 MVP를 위한 Spring Boot 기반 judge worker 저장소다. 현재 저장소에는 Next.js Web/API 소스가 없고, Spring worker와 실행/배포 설정만 포함한다.
+SSOJ is a Spring Boot based online judge worker repository for the MVP phase.
+The current repository contains the worker/orchestrator/runner code, not the
+Next.js Web/API code.
 
-## 현재 구현 요약
+## Current Implementation
 
-- Web/API는 저장소 밖에 있으며, `submissions` row를 만든 뒤 `submissionId`를 Redis 또는 Cloud Tasks로 전달하는 상위 계층으로 전제한다.
-- Spring Boot는 `orchestrator`와 `runner` 역할을 profile/property로 나눈다.
-- 로컬 검증은 Redis polling과 Docker executor를 사용한다.
-- 배포형 orchestrator는 Cloud Tasks HTTP trigger와 remote runner 호출을 사용한다.
-- runner는 단일 실행 요청을 받고 Docker 기반 executor로 코드를 실행한다.
-- SSE는 현재 구현 범위에 없다.
+- Web/API is expected to create a `submissions` row first, then pass the
+  `submissionId` through Redis or Cloud Tasks.
+- Spring Boot can run as an orchestrator or runner depending on profile/property.
+- Local validation uses Redis polling and Docker execution.
+- Deployment mode uses an HTTP-triggered orchestrator and a remote runner.
+- SSE/realtime push is out of scope.
 
-## 핵심 흐름
+## Judging Flow
 
 ```text
-submission 생성
--> submissionId 전달
+submission created
+-> submissionId dispatched
 -> JudgeService
--> hidden problem_testcases를 testcase_order 순서로 실행
--> 첫 실패(WA/TLE/RE/MLE)에서 즉시 종료
--> 실행된 testcase까지만 submission_testcase_results 저장
--> submissions.status=DONE
--> result, failed_testcase_order, execution_time_ms, memory_kb, judged_at 저장
+-> hidden problem_testcases executed by testcase_order
+-> stop immediately on first WA/TLE/RE/MLE
+-> update submissions with final result only
 ```
 
-AC인 경우 `failed_testcase_order`는 `null`이다. CE와 SYSTEM_ERROR도 현재 코드 기준으로 특정 testcase 실패로 노출하지 않으므로 `failed_testcase_order=null`이다.
+The worker no longer writes testcase-level result rows. A submission result is
+stored in `submissions` with:
 
-## DB 기준
+- `status`
+- `result`
+- `failed_testcase_order`
+- `execution_time_ms`
+- `memory_kb`
+- `submitted_at`
+- `judged_at`
 
-현재 JPA 매핑은 기존 Supabase PostgreSQL 스키마를 따르는 것을 전제로 한다.
+`failed_testcase_order` is `null` for `AC`, `CE`, and `SYSTEM_ERROR`.
+
+## DB Baseline
+
+The active JPA mappings use these tables:
 
 - `users`
 - `problems`
 - `problem_examples`
 - `problem_testcases`
 - `submissions`
-- `submission_testcase_results`
 
-중요 타입:
+Important IDs:
 
 - `problems.id`: `String`
 - `submissions.id`: `UUID`
 - `problem_testcases.id`: `UUID`
-- `submission_testcase_results.id`: `UUID`
 
-주의: 현재 코드에는 `submissions.failed_testcase_order` 매핑이 있다. 기존 DB에 이 컬럼이 없다면 `spring.jpa.hibernate.ddl-auto=validate`에서 실패한다. 이 저장소에서는 DDL/migration을 작성하지 않는다.
+Note: this repository does not add DDL/migration files. If an existing DB still
+has `submission_testcase_results`, dropping it is a code-external follow-up.
 
-## 실행 모드
+## Run
 
-| 목적 | profile/property | 설명 |
-| --- | --- | --- |
-| 로컬 worker | `SPRING_PROFILES_ACTIVE=local` | Redis polling + Docker execution |
-| 배포 orchestrator | `SPRING_PROFILES_ACTIVE=remote` | HTTP trigger + Cloud Tasks + remote runner |
-| 실행 runner | `SPRING_PROFILES_ACTIVE=runner` | DB/Redis 없이 단일 실행 요청 처리 |
-
-## 빠른 실행
-
-로컬:
+Local:
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
@@ -68,20 +70,16 @@ Redis enqueue:
 redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
 ```
 
-테스트:
+Tests:
 
 ```powershell
 .\gradlew.bat test
 ```
 
-## 문서 구조
+## Docs
 
-실사용 문서는 아래 5개를 기준으로 본다.
-
-- [아키텍처](docs/architecture.md)
-- [로컬 개발](docs/local-development.md)
-- [배포](docs/deployment.md)
-- [채점 모델](docs/judging-model.md)
-- [검증 체크리스트](docs/validation-checklist.md)
-
-기존 세부 메모와 이전 점검 문서는 [docs/archive](docs/archive/)에 보관한다. archive 문서는 이력 참고용이며, 현재 기준은 위 핵심 문서가 우선이다.
+- [Architecture](docs/architecture.md)
+- [Local Development](docs/local-development.md)
+- [Deployment](docs/deployment.md)
+- [Judging Model](docs/judging-model.md)
+- [Validation Checklist](docs/validation-checklist.md)

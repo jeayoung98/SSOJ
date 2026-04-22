@@ -1,12 +1,9 @@
 package com.example.ssoj.judge.application.sevice;
 
-import com.example.ssoj.judge.domain.model.CaseJudgeResult;
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.domain.model.StartedJudging;
 import com.example.ssoj.submission.domain.Submission;
-import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.testcase.infrastructure.ProblemTestcaseRepository;
 import org.slf4j.Logger;
@@ -27,16 +24,13 @@ public class JudgePersistenceService {
 
     private final SubmissionRepository submissionRepository;
     private final ProblemTestcaseRepository problemTestcaseRepository;
-    private final SubmissionTestcaseResultRepository submissionTestcaseResultRepository;
 
     public JudgePersistenceService(
             SubmissionRepository submissionRepository,
-            ProblemTestcaseRepository problemTestcaseRepository,
-            SubmissionTestcaseResultRepository submissionTestcaseResultRepository
+            ProblemTestcaseRepository problemTestcaseRepository
     ) {
         this.submissionRepository = submissionRepository;
         this.problemTestcaseRepository = problemTestcaseRepository;
-        this.submissionTestcaseResultRepository = submissionTestcaseResultRepository;
     }
 
     @Transactional
@@ -88,17 +82,6 @@ public class JudgePersistenceService {
         if (submission == null) {
             log.warn("Submission {} disappeared before saving judge result", submissionId);
             return;
-        }
-
-        for (CaseJudgeResult caseResult : runResult.caseResults()) {
-            submissionTestcaseResultRepository.save(new SubmissionTestcaseResult(
-                    submission,
-                    problemTestcaseRepository.getReferenceById(caseResult.testCaseId()),
-                    caseResult.result(),
-                    caseResult.executionTimeMs(),
-                    caseResult.memoryKb(),
-                    caseResult.errorMessage()
-            ));
         }
 
         submission.finish(

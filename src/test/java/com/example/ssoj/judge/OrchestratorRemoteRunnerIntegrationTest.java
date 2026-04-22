@@ -4,8 +4,6 @@ import com.example.ssoj.problem.domain.Problem;
 import com.example.ssoj.problem.infrastructure.ProblemRepository;
 import com.example.ssoj.submission.domain.Submission;
 import com.example.ssoj.submission.domain.SubmissionResult;
-import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.submission.domain.SubmissionStatus;
 import com.example.ssoj.testcase.domain.ProblemTestcase;
@@ -35,7 +33,6 @@ import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.net.InetSocketAddress;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -78,9 +75,6 @@ class OrchestratorRemoteRunnerIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
-    private SubmissionTestcaseResultRepository submissionCaseResultRepository;
-
     @DynamicPropertySource
     static void remoteRunnerProperties(DynamicPropertyRegistry registry) throws IOException {
         ensureRunnerServerStarted();
@@ -98,7 +92,6 @@ class OrchestratorRemoteRunnerIntegrationTest {
     @AfterEach
     void tearDown() {
         RECEIVED_REQUESTS.clear();
-        submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
         userRepository.deleteAll();
         testCaseRepository.deleteAll();
@@ -122,19 +115,14 @@ class OrchestratorRemoteRunnerIntegrationTest {
         );
 
         Submission finishedSubmission = submissionRepository.findById(submission.getId()).orElseThrow();
-        List<SubmissionTestcaseResult> caseResults = submissionCaseResultRepository.findAll().stream()
-                .filter(result -> result.getSubmission().getId().equals(submission.getId()))
-                .sorted(Comparator.comparing(SubmissionTestcaseResult::getId))
-                .toList();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(5);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
-        assertThat(caseResults).hasSize(2);
-        assertThat(caseResults)
-                .extracting(SubmissionTestcaseResult::getResult)
-                .containsExactly(SubmissionResult.AC, SubmissionResult.AC);
         assertThat(RECEIVED_REQUESTS).hasSize(2);
         assertThat(RECEIVED_REQUESTS)
                 .extracting(RunnerExecutionRequest::input)

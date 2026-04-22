@@ -1,10 +1,11 @@
-# 검증 체크리스트
+# Validation Checklist
 
-이 문서는 현재 코드 기준의 수동 검증과 테스트 관점을 한 곳에 모은다.
+This document lists manual checks and automated test expectations for the
+current worker.
 
-## 기본 실행 검증
+## Basic Run
 
-로컬 실행:
+Local run:
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
@@ -16,13 +17,13 @@ Redis enqueue:
 redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
 ```
 
-테스트:
+Tests:
 
 ```powershell
 .\gradlew.bat test
 ```
 
-## DB 확인
+## DB Check
 
 ```sql
 select id,
@@ -39,62 +40,52 @@ from submissions
 where id = :submission_id;
 ```
 
-```sql
-select submission_id,
-       testcase_id,
-       result,
-       execution_time_ms,
-       memory_kb,
-       error_message
-from submission_testcase_results
-where submission_id = :submission_id;
-```
+## Judge Result Expectations
 
-## 채점 결과 검증
-
-| 시나리오 | 기대값 |
+| Scenario | Expected value |
 | --- | --- |
-| 모든 testcase AC | `result=AC`, `failed_testcase_order=null` |
-| 1번 WA | `result=WA`, `failed_testcase_order=1`, 2번 이후 미실행 |
-| 중간 testcase WA/TLE/RE/MLE | 해당 order 저장, 이후 testcase 미실행 |
+| All testcases AC | `result=AC`, `failed_testcase_order=null` |
+| testcase 1 WA | `result=WA`, `failed_testcase_order=1`, later cases not executed |
+| Middle testcase WA/TLE/RE/MLE | matching order saved, later cases not executed |
 | CE | `result=CE`, `failed_testcase_order=null` |
 | SYSTEM_ERROR | `result=SYSTEM_ERROR`, `failed_testcase_order=null` |
 
-실행된 testcase까지만 `submission_testcase_results`가 생긴다.
+Only `submissions` is updated with the final result.
 
-## 실행 시간/메모리 검증
+## Time And Memory
 
-여러 testcase가 실행되면 제출 단위 값은 최대값이다.
+When multiple testcases are executed, submission-level values use the maximum
+among executed testcases.
 
-예시:
+Example:
 
 | testcase | executionTimeMs | memoryKb |
 | --- | ---: | ---: |
 | 1 | 5 | 128 |
 | 2 | 6 | 64 |
 
-기대:
+Expected:
 
 - `submissions.execution_time_ms = 6`
 - `submissions.memory_kb = 128`
 
-local Docker executor는 실제 메모리 사용량을 `null`로 반환할 수 있다.
+Local Docker executor may return `null` for real memory usage.
 
-## Remote 검증
+## Remote Validation
 
-runner:
+Runner:
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=runner --server.port=8081"
 ```
 
-orchestrator:
+Orchestrator:
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=remote --server.port=8080 --judge.execution.remote.base-url=http://localhost:8081"
 ```
 
-trigger:
+Trigger:
 
 ```powershell
 curl -X POST http://localhost:8080/internal/judge-executions ^
@@ -102,31 +93,32 @@ curl -X POST http://localhost:8080/internal/judge-executions ^
   -d "{\"submissionId\":\"00000000-0000-0000-0000-000000000001\"}"
 ```
 
-확인:
+Check:
 
-- orchestrator가 `/internal/judge-executions`를 받는가
-- runner가 `/internal/runner-executions`를 받는가
-- runner가 DB/Redis 없이 실행되는가
-- 결과 저장은 orchestrator가 수행하는가
+- orchestrator accepts `/internal/judge-executions`
+- runner accepts `/internal/runner-executions`
+- runner executes without DB/Redis
+- orchestrator saves final result to `submissions`
 
-## Docker cleanup 검증
+## Docker Cleanup
 
-확인:
+Check:
 
-- timeout 후 container가 남지 않는가
-- temp workspace가 삭제되는가
-- `.container.cid` 파일이 남지 않는가
-- 실패해도 `submissions.status=DONE`으로 마감되는가
+- containers are not left behind after timeout
+- temp workspaces are removed
+- `.container.cid` files are not left behind
+- failed submissions still finish with `submissions.status=DONE`
 
-## 배포 전 검증
+## Deployment Checks
 
-- DB에 `failed_testcase_order` 컬럼이 있는가
-- 운영에서 `ddl-auto`가 `validate` 또는 `none`인가
-- Cloud Tasks payload가 UUID JSON인가
-- Redis payload는 로컬에서 plain UUID 문자열인가
-- runner host에 Docker daemon이 있는가
-- 표준 Cloud Run runner 실행 가능 여부를 확정된 것으로 문서화하지 않았는가
+- DB has the submission result columns used by `Submission`
+- production `ddl-auto` is `validate` or `none`
+- Cloud Tasks payload is UUID JSON
+- Redis local payload is plain UUID string
+- runner host has Docker daemon if Docker execution is used
 
-## Archive 참고
+## Archive Reference
 
-이전 개별 E2E, demo, cleanup, concurrency, C++ 검증 문서는 `docs/archive/`에 있다. 현재 검증 기준은 이 문서를 우선한다.
+Older E2E/demo/cleanup/concurrency/C++ notes live under `docs/archive/`.
+Those files are historical references and may mention removed testcase result
+storage.

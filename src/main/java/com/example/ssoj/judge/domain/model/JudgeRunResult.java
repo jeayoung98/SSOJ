@@ -2,10 +2,7 @@ package com.example.ssoj.judge.domain.model;
 
 import com.example.ssoj.submission.domain.SubmissionResult;
 
-import java.util.List;
-
 public record JudgeRunResult(
-        List<CaseJudgeResult> caseResults,
         SubmissionResult finalResult,
         Integer executionTimeMs,
         Integer memoryKb,
@@ -13,15 +10,14 @@ public record JudgeRunResult(
 ) {
 
     public JudgeRunResult(
-            List<CaseJudgeResult> caseResults,
             SubmissionResult finalResult,
             Integer executionTimeMs,
             Integer memoryKb
     ) {
-        this(caseResults, finalResult, executionTimeMs, memoryKb, null);
+        this(finalResult, executionTimeMs, memoryKb, null);
     }
 
     public static JudgeRunResult systemError() {
-        return new JudgeRunResult(List.of(), SubmissionResult.SYSTEM_ERROR, null, null);
+        return new JudgeRunResult(SubmissionResult.SYSTEM_ERROR, null, null);
     }
 }

@@ -4,8 +4,6 @@ import com.example.ssoj.problem.domain.Problem;
 import com.example.ssoj.problem.infrastructure.ProblemRepository;
 import com.example.ssoj.submission.domain.Submission;
 import com.example.ssoj.submission.domain.SubmissionResult;
-import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.submission.domain.SubmissionStatus;
 import com.example.ssoj.testcase.domain.ProblemTestcase;
@@ -34,7 +32,6 @@ import java.lang.reflect.Constructor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -73,9 +70,6 @@ class JudgePipelineIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
-    private SubmissionTestcaseResultRepository submissionCaseResultRepository;
-
-    @Autowired
     private ListOperations<String, String> listOperations;
 
     @Autowired
@@ -87,7 +81,6 @@ class JudgePipelineIntegrationTest {
     @AfterEach
     void tearDown() {
         reset(listOperations);
-        submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
         userRepository.deleteAll();
         testCaseRepository.deleteAll();
@@ -108,7 +101,6 @@ class JudgePipelineIntegrationTest {
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.AC, Duration.ofSeconds(5));
-        List<SubmissionTestcaseResult> caseResults = submissionCaseResults(submission.getId());
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
@@ -116,9 +108,6 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(7);
         assertThat(finishedSubmission.getMemoryKb()).isEqualTo(256);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
-        assertThat(caseResults).hasSize(1);
-        assertThat(caseResults.get(0).getResult()).isEqualTo(SubmissionResult.AC);
-        assertThat(caseResults.get(0).getExecutionTimeMs()).isEqualTo(7);
         assertThat(fakeLanguageExecutor.executedContexts()).hasSize(1);
         assertThat(fakeLanguageExecutor.lastContext()).isNotNull();
         assertThat(fakeLanguageExecutor.lastContext().submissionId()).isEqualTo(submission.getId());
@@ -138,14 +127,12 @@ class JudgePipelineIntegrationTest {
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.TLE, Duration.ofSeconds(5));
-        List<SubmissionTestcaseResult> caseResults = submissionCaseResults(submission.getId());
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.TLE);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isEqualTo(1);
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(3000);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
-        assertThat(caseResults).hasSize(1);
-        assertThat(caseResults.get(0).getResult()).isEqualTo(SubmissionResult.TLE);
-        assertThat(caseResults.get(0).getExecutionTimeMs()).isEqualTo(3000);
         assertThat(fakeLanguageExecutor.executedContexts()).hasSize(1);
     }
 
@@ -153,8 +140,8 @@ class JudgePipelineIntegrationTest {
     void consume_stopsAfterFirstHiddenCaseFailure_andDoesNotPersistLaterCases() throws InterruptedException {
         Problem problem = problemRepository.save(problem(1000, 128));
         User user = userRepository.save(user());
-        ProblemTestcase firstCase = testCaseRepository.save(testCase(problem, 1, "1", "1\n", true));
-        ProblemTestcase secondCase = testCaseRepository.save(testCase(problem, 2, "2", "2\n", true));
+        testCaseRepository.save(testCase(problem, 1, "1", "1\n", true));
+        testCaseRepository.save(testCase(problem, 2, "2", "2\n", true));
         testCaseRepository.save(testCase(problem, 3, "3", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
@@ -168,7 +155,6 @@ class JudgePipelineIntegrationTest {
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.WA, Duration.ofSeconds(5));
-        List<SubmissionTestcaseResult> caseResults = submissionCaseResults(submission.getId());
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.WA);
@@ -176,13 +162,6 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(6);
         assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
-        assertThat(caseResults).hasSize(2);
-        assertThat(caseResults)
-                .extracting(result -> result.getTestcase().getId())
-                .containsExactly(firstCase.getId(), secondCase.getId());
-        assertThat(caseResults)
-                .extracting(SubmissionTestcaseResult::getResult)
-                .containsExactly(SubmissionResult.AC, SubmissionResult.WA);
         assertThat(fakeLanguageExecutor.executedContexts()).hasSize(2);
     }
 
@@ -199,13 +178,6 @@ class JudgePipelineIntegrationTest {
 
         Submission current = submissionRepository.findById(submissionId).orElseThrow();
         throw new AssertionError("Timed out waiting for submission status. currentStatus=" + current.getStatus());
-    }
-
-    private List<SubmissionTestcaseResult> submissionCaseResults(UUID submissionId) {
-        return submissionCaseResultRepository.findAll().stream()
-                .filter(result -> result.getSubmission().getId().equals(submissionId))
-                .sorted(Comparator.comparing(SubmissionTestcaseResult::getExecutionTimeMs))
-                .toList();
     }
 
     private static Problem problem(int timeLimitMs, int memoryLimitMb) {

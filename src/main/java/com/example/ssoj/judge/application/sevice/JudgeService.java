@@ -2,7 +2,6 @@ package com.example.ssoj.judge.application.sevice;
 
 import com.example.ssoj.submission.domain.SubmissionResult;
 import com.example.ssoj.judge.application.port.ExecutionGateway;
-import com.example.ssoj.judge.domain.model.CaseJudgeResult;
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
@@ -64,10 +63,9 @@ public class JudgeService {
         List<HiddenTestCaseSnapshot> hiddenTestCases = startedJudging.hiddenTestCases();
         if (hiddenTestCases.isEmpty()) {
             log.info("Submission {} has no hidden test cases. Finishing with AC.", startedJudging.submissionId());
-            return new JudgeRunResult(List.of(), SubmissionResult.AC, null, null);
+            return new JudgeRunResult(SubmissionResult.AC, null, null);
         }
 
-        List<CaseJudgeResult> caseResults = new java.util.ArrayList<>();
         SubmissionResult finalResult = SubmissionResult.AC;
         Integer maxExecutionTimeMs = null;
         Integer maxMemoryKb = null;
@@ -94,15 +92,6 @@ public class JudgeService {
             maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
             maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
 
-            caseResults.add(new CaseJudgeResult(
-                    testCase.testCaseId(),
-                    testCase.testCaseOrder(),
-                    caseResult,
-                    executionResult.executionTimeMs(),
-                    executionResult.memoryUsageKb(),
-                    executionResult.stderr()
-            ));
-
             if (caseResult != SubmissionResult.AC) {
                 finalResult = caseResult;
                 failedTestcaseOrder = hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null;
@@ -110,7 +99,7 @@ public class JudgeService {
             }
         }
 
-        return new JudgeRunResult(caseResults, finalResult, maxExecutionTimeMs, maxMemoryKb, failedTestcaseOrder);
+        return new JudgeRunResult(finalResult, maxExecutionTimeMs, maxMemoryKb, failedTestcaseOrder);
     }
 
     private SubmissionResult determineCaseResult(

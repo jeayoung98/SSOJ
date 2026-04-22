@@ -4,8 +4,6 @@ import com.example.ssoj.problem.domain.Problem;
 import com.example.ssoj.problem.infrastructure.ProblemRepository;
 import com.example.ssoj.submission.domain.Submission;
 import com.example.ssoj.submission.domain.SubmissionResult;
-import com.example.ssoj.submission.domain.SubmissionTestcaseResult;
-import com.example.ssoj.submission.infrastructure.SubmissionTestcaseResultRepository;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
 import com.example.ssoj.submission.domain.SubmissionStatus;
 import com.example.ssoj.testcase.domain.ProblemTestcase;
@@ -37,7 +35,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.lang.reflect.Constructor;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -85,9 +82,6 @@ class JudgePipelineTestcontainersIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
-    private SubmissionTestcaseResultRepository submissionCaseResultRepository;
-
-    @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
@@ -98,7 +92,6 @@ class JudgePipelineTestcontainersIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        submissionCaseResultRepository.deleteAll();
         submissionRepository.deleteAll();
         userRepository.deleteAll();
         testCaseRepository.deleteAll();
@@ -119,13 +112,13 @@ class JudgePipelineTestcontainersIntegrationTest {
         judgeQueueConsumer.consume();
 
         Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.AC, Duration.ofSeconds(5));
-        List<SubmissionTestcaseResult> caseResults = submissionCaseResultRepository.findAll();
 
         assertThat(finishedSubmission.getStatus()).isEqualTo(SubmissionStatus.DONE);
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(11);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
-        assertThat(caseResults).hasSize(1);
-        assertThat(caseResults.get(0).getResult()).isEqualTo(SubmissionResult.AC);
     }
 
     private Submission awaitSubmission(UUID submissionId, SubmissionResult expectedResult, Duration timeout)
