@@ -63,4 +63,92 @@ class DockerProcessExecutorTest {
             }
         }
     }
+
+    @Test
+    void executeRun_acceptsSimpleProgramWithinThreeSecondsAndMeasuresMetrics() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-process-ac-test-");
+
+        try {
+            JudgeContext context = new JudgeContext(
+                    102L,
+                    202L,
+                    "python",
+                    "",
+                    "1 2\n",
+                    3000,
+                    128
+            );
+
+            JudgeExecutionResult result = dockerProcessExecutor.executeRun(
+                    context,
+                    workspaceDirectory,
+                    "python:3.11",
+                    128,
+                    "python3 -c 'a,b=map(int,input().split()); print(a+b)'"
+            );
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.timedOut()).isFalse();
+            assertThat(result.stdout()).isEqualTo("3\n");
+            assertThat(result.executionTimeMs()).isNotNull();
+            assertThat(result.memoryUsageKb()).isNotNull();
+        } finally {
+            if (Files.exists(workspaceDirectory)) {
+                try (var paths = Files.walk(workspaceDirectory)) {
+                    paths.sorted((left, right) -> right.compareTo(left))
+                            .forEach(path -> {
+                                try {
+                                    Files.deleteIfExists(path);
+                                } catch (Exception ignored) {
+                                }
+                            });
+                }
+            }
+        }
+    }
+
+    @Test
+    void executeRun_timesOutWhenTimeoutCommandUsesFractionalSeconds() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-process-timeout-test-");
+
+        try {
+            JudgeContext context = new JudgeContext(
+                    101L,
+                    201L,
+                    "python",
+                    "",
+                    "",
+                    1000,
+                    128
+            );
+
+            JudgeExecutionResult result = dockerProcessExecutor.executeRun(
+                    context,
+                    workspaceDirectory,
+                    "python:3.11",
+                    128,
+                    "python3 -c \"import time; time.sleep(2)\""
+            );
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.timedOut()).isTrue();
+            assertThat(result.exitCode()).isEqualTo(124);
+            assertThat(result.executionTimeMs()).isNotNull();
+            assertThat(result.memoryUsageKb()).isNotNull();
+        } finally {
+            if (Files.exists(workspaceDirectory)) {
+                try (var paths = Files.walk(workspaceDirectory)) {
+                    paths.sorted((left, right) -> right.compareTo(left))
+                            .forEach(path -> {
+                                try {
+                                    Files.deleteIfExists(path);
+                                } catch (Exception ignored) {
+                                }
+                            });
+                }
+            }
+        }
+    }
 }

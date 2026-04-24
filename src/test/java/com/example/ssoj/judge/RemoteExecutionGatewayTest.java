@@ -49,6 +49,53 @@ class RemoteExecutionGatewayTest {
         assertThat(result.systemError()).isFalse();
         assertThat(result.timedOut()).isFalse();
         assertThat(result.compilationError()).isTrue();
+        assertThat(result.memoryLimitExceeded()).isFalse();
+    }
+
+    @Test
+    void runnerExecutionResponse_from_preservesExecutionMetrics() {
+        RunnerExecutionResponse response = RunnerExecutionResponse.from(new JudgeExecutionResult(
+                false,
+                "",
+                "oom",
+                137,
+                1234,
+                54321,
+                false,
+                false,
+                false,
+                true
+        ));
+
+        assertThat(response.executionTimeMs()).isEqualTo(1234);
+        assertThat(response.memoryUsageKb()).isEqualTo(54321);
+        assertThat(response.memoryLimitExceeded()).isTrue();
+    }
+
+    @Test
+    void execute_mapsMemoryLimitExceededMetricFromRunnerResponse() {
+        RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
+        JudgeContext context = new JudgeContext(1L, 2L, "python", "print(1)", "", 1000, 128);
+
+        when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
+                .thenReturn(new RunnerExecutionResponse(
+                        false,
+                        "",
+                        "Killed",
+                        137,
+                        777,
+                        222222,
+                        false,
+                        false,
+                        false,
+                        true
+                ));
+
+        JudgeExecutionResult result = gateway.execute(context);
+
+        assertThat(result.executionTimeMs()).isEqualTo(777);
+        assertThat(result.memoryUsageKb()).isEqualTo(222222);
+        assertThat(result.memoryLimitExceeded()).isTrue();
     }
 
     @Test
@@ -71,6 +118,7 @@ class RemoteExecutionGatewayTest {
 
         assertThat(gateway.supports("JAVA")).isTrue();
         assertThat(gateway.supports("python")).isTrue();
+        assertThat(gateway.supports(null)).isFalse();
         assertThat(gateway.supports("unknown")).isFalse();
     }
 }

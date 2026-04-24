@@ -155,6 +155,8 @@ class JudgeServiceTest {
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
         assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isNull();
+        assertThat(runResult.memoryKb()).isNull();
         assertThat(finishedAtCaptor.getValue()).isNotNull();
     }
 
@@ -269,7 +271,38 @@ class JudgeServiceTest {
         JudgeRunResult runResult = runResultCaptor.getValue();
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
         assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isNull();
+        assertThat(runResult.memoryKb()).isNull();
         assertThat(finishedAtCaptor.getValue()).isNotNull();
+    }
+
+    @Test
+    void judge_finishesAcWithNullMetricsWhenThereAreNoHiddenCases() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_16,
+                "python",
+                List.of()
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_16)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+
+        judgeService.judge(SUBMISSION_16);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(executionGateway, never()).execute(any(JudgeContext.class));
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_16), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(runResult.executionTimeMs()).isNull();
+        assertThat(runResult.memoryKb()).isNull();
+        assertThat(runResult.failedTestcaseOrder()).isNull();
     }
 
     @Test
@@ -288,7 +321,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_17)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "OK\n", "", 0, 2400, 64, false, false, false, false));
+                .thenReturn(success("OK\n", 2400, 64));
 
         judgeService.judge(SUBMISSION_17);
 
@@ -324,8 +357,8 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_18)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 3, 32, false, false, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "wrong\n", "", 0, 4, 32, false, false, false, false));
+                .thenReturn(success("1\n", 3, 32))
+                .thenReturn(success("wrong\n", 4, 32));
 
         judgeService.judge(SUBMISSION_18);
 
@@ -360,9 +393,9 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_19)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 10, 100, false, false, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "2\n", "", 0, 25, 64, false, false, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "3\n", "", 0, 7, 512, false, false, false, false));
+                .thenReturn(success("1\n", 10, 100))
+                .thenReturn(success("2\n", 25, 64))
+                .thenReturn(success("3\n", 7, 512));
 
         judgeService.judge(SUBMISSION_19);
 
@@ -396,7 +429,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_20)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 8, 128 * 1024 + 1, false, false, false, false));
+                .thenReturn(success("1\n", 8, 128 * 1024 + 1));
 
         judgeService.judge(SUBMISSION_20);
 
@@ -427,7 +460,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_20)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(false, "", "Killed", 137, 20, 0, false, false, false, true));
+                .thenReturn(memoryLimitExceeded(20, 0));
 
         judgeService.judge(SUBMISSION_20);
 
@@ -438,6 +471,64 @@ class JudgeServiceTest {
         assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.MLE);
         assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
         assertThat(runResult.executionTimeMs()).isEqualTo(20);
+    }
+
+    @Test
+    void judge_doesNotTreatJavaRssAloneAsMle() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_12,
+                "java",
+                List.of(hiddenTestCase(CASE_203, 1, "", "OK"))
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_12)).thenReturn(startedJudging);
+        when(executionGateway.supports("java")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
+                .thenReturn(success("OK\n", 15, 128 * 1024 + 1));
+
+        judgeService.judge(SUBMISSION_12);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_12), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(runResult.failedTestcaseOrder()).isNull();
+        assertThat(runResult.executionTimeMs()).isEqualTo(15);
+        assertThat(runResult.memoryKb()).isEqualTo(128 * 1024 + 1);
+    }
+
+    @Test
+    void judge_treatsJavaMemoryLimitExceededFlagAsMle() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_12,
+                "java",
+                List.of(hiddenTestCase(CASE_203, 1, "", "OK"))
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_12)).thenReturn(startedJudging);
+        when(executionGateway.supports("java")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
+                .thenReturn(memoryLimitExceeded(15, 128 * 1024 + 1));
+
+        judgeService.judge(SUBMISSION_12);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_12), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.MLE);
+        assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
     }
 
     private static StartedJudging startedJudging(
@@ -462,5 +553,13 @@ class JudgeServiceTest {
 
     private static HiddenTestCaseSnapshot hiddenTestCase(Long testCaseId, int order, String input, String expectedOutput) {
         return new HiddenTestCaseSnapshot(testCaseId, order, input, expectedOutput);
+    }
+
+    private static JudgeExecutionResult success(String stdout, int executionTimeMs, int memoryUsageKb) {
+        return new JudgeExecutionResult(true, stdout, "", 0, executionTimeMs, memoryUsageKb, false, false, false, false);
+    }
+
+    private static JudgeExecutionResult memoryLimitExceeded(int executionTimeMs, int memoryUsageKb) {
+        return new JudgeExecutionResult(false, "", "Killed", 137, executionTimeMs, memoryUsageKb, false, false, false, true);
     }
 }

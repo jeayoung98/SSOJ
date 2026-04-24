@@ -125,7 +125,7 @@ public class JudgeService {
             return SubmissionResult.TLE;
         }
 
-        if (isMemoryLimitExceeded(executionResult, memoryLimitMb)) {
+        if (isMemoryLimitExceeded(language, executionResult, memoryLimitMb)) {
             return SubmissionResult.MLE;
         }
 
@@ -147,13 +147,17 @@ public class JudgeService {
                 || result == SubmissionResult.MLE;
     }
 
-    private boolean isMemoryLimitExceeded(JudgeExecutionResult executionResult, Integer memoryLimitMb) {
+    private boolean isMemoryLimitExceeded(String language, JudgeExecutionResult executionResult, Integer memoryLimitMb) {
         if (memoryLimitMb == null) {
             return false;
         }
 
         if (executionResult.memoryLimitExceeded()) {
             return true;
+        }
+
+        if ("java".equalsIgnoreCase(language)) {
+            return Integer.valueOf(137).equals(executionResult.exitCode());
         }
 
         if (executionResult.memoryUsageKb() != null) {

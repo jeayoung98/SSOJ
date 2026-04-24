@@ -34,7 +34,7 @@ public class RemoteExecutionGateway implements ExecutionGateway {
 
     @Override
     public boolean supports(String language) {
-        return supportedLanguages.contains(language.toLowerCase());
+        return language != null && supportedLanguages.contains(language.toLowerCase());
     }
 
     @Override
