@@ -22,7 +22,7 @@ class PythonExecutorTest {
     @Test
     void execute_createsMainPyUnderWorkspaceBeforeDockerExecution() {
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
-                new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false)
+                new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false, false, false)
         );
         PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
@@ -33,14 +33,15 @@ class PythonExecutorTest {
                 "print(1 + 2)",
                 "",
                 1000,
-                128
+                64
         ));
 
         assertThat(result.success()).isTrue();
         assertThat(dockerProcessExecutor.workspaceDirectory).isNotNull();
         assertThat(dockerProcessExecutor.workspaceExistsDuringExecution).isTrue();
         assertThat(dockerProcessExecutor.sourceFileExistsDuringExecution).isTrue();
-        assertThat(dockerProcessExecutor.containerCommand).isEqualTo("python3 main.py");
+        assertThat(dockerProcessExecutor.runCommand).isEqualTo("python3 main.py");
+        assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(128);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
@@ -50,23 +51,26 @@ class PythonExecutorTest {
         private Path workspaceDirectory;
         private boolean workspaceExistsDuringExecution;
         private boolean sourceFileExistsDuringExecution;
-        private String containerCommand;
+        private String runCommand;
+        private int dockerMemoryMb;
 
         RecordingDockerProcessExecutor(JudgeExecutionResult result) {
             this.result = result;
         }
 
         @Override
-        public JudgeExecutionResult execute(
+        public JudgeExecutionResult executeRun(
                 JudgeContext context,
                 Path workspaceDirectory,
                 String dockerImage,
-                String containerCommand
+                int dockerMemoryMb,
+                String runCommand
         ) throws IOException, InterruptedException {
             this.workspaceDirectory = workspaceDirectory;
             this.workspaceExistsDuringExecution = Files.exists(workspaceDirectory);
             this.sourceFileExistsDuringExecution = Files.exists(workspaceDirectory.resolve("main.py"));
-            this.containerCommand = containerCommand;
+            this.runCommand = runCommand;
+            this.dockerMemoryMb = dockerMemoryMb;
 
             return result;
         }

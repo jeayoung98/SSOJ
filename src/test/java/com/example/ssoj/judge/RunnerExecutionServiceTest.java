@@ -23,7 +23,7 @@ class RunnerExecutionServiceTest {
     void execute_usesMatchingLanguageExecutorAndMapsResponse() {
         RecordingLanguageExecutor executor = new RecordingLanguageExecutor(
                 "python",
-                new JudgeExecutionResult(true, "42\n", "", 0, 12, 256, false, false)
+                new JudgeExecutionResult(true, "42\n", "", 0, 12, 256, false, false, false, false)
         );
         RunnerExecutionService service = new RunnerExecutionService(
                 new RunnerLanguageExecutorSelector(java.util.List.of(executor))

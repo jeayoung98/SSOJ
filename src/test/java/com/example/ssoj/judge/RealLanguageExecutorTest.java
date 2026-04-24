@@ -17,6 +17,7 @@ class RealLanguageExecutorTest {
 
     private static final int TIME_LIMIT_MS = 3000;
     private static final int MEMORY_LIMIT_MB = 128;
+    private static final long COMPILE_TIMEOUT_MS = 15000L;
 
     private final DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory = new WorkspaceDirectoryFactory("/tmp/ssoj-runner-workspaces");
@@ -26,6 +27,7 @@ class RealLanguageExecutorTest {
         // 1초 정도 대기한 뒤 정답을 출력하는 실제 제출 코드다.
         CppExecutor cppExecutor = new CppExecutor(
                 "gcc:13",
+                COMPILE_TIMEOUT_MS,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
                 dockerProcessExecutor,
@@ -63,7 +65,12 @@ class RealLanguageExecutorTest {
     @Test
     void javaExecutor_executesLongRunningButSuccessfulSubmission() {
         // 1초 정도 대기한 뒤 정답을 출력하는 실제 제출 코드다.
-        JavaExecutor javaExecutor = new JavaExecutor("eclipse-temurin:17-jdk", dockerProcessExecutor, workspaceDirectoryFactory);
+        JavaExecutor javaExecutor = new JavaExecutor(
+                "eclipse-temurin:17-jdk",
+                COMPILE_TIMEOUT_MS,
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
+        );
 
         JudgeExecutionResult result = javaExecutor.execute(new JudgeContext(
                 1002L,
@@ -118,6 +125,56 @@ class RealLanguageExecutorTest {
         assertSuccessfulLongRunningResult(result, "3\n");
     }
 
+    @Test
+    void pythonExecutor_marksSleepLongerThanProblemLimitAsTle() {
+        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+
+        JudgeExecutionResult result = pythonExecutor.execute(new JudgeContext(
+                1004L,
+                2004L,
+                "python",
+                """
+                import time
+                time.sleep(2)
+                print("done")
+                """,
+                "",
+                1000,
+                MEMORY_LIMIT_MB
+        ));
+
+        assertThat(result.systemError()).isFalse();
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.exitCode()).isEqualTo(124);
+        assertThat(result.executionTimeMs()).isGreaterThanOrEqualTo(1000);
+    }
+
+    @Test
+    void pythonExecutor_acceptsSleepWithinProblemLimit() {
+        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+
+        JudgeExecutionResult result = pythonExecutor.execute(new JudgeContext(
+                1005L,
+                2005L,
+                "python",
+                """
+                import time
+                time.sleep(2)
+                print("done")
+                """,
+                "",
+                3000,
+                MEMORY_LIMIT_MB
+        ));
+
+        assertThat(result.systemError()).isFalse();
+        assertThat(result.timedOut()).isFalse();
+        assertThat(result.success()).isTrue();
+        assertThat(result.stdout()).isEqualTo("done\n");
+        assertThat(result.executionTimeMs()).isGreaterThanOrEqualTo(1900);
+        assertThat(result.executionTimeMs()).isLessThan(3000);
+    }
+
     private static void assertSuccessfulLongRunningResult(JudgeExecutionResult result, String expectedOutput) {
         assertThat(result.systemError()).isFalse();
         assertThat(result.timedOut()).isFalse();
@@ -128,5 +185,7 @@ class RealLanguageExecutorTest {
         assertThat(result.executionTimeMs()).isNotNull();
         assertThat(result.executionTimeMs()).isGreaterThanOrEqualTo(900);
         assertThat(result.executionTimeMs()).isLessThan(TIME_LIMIT_MS);
+        assertThat(result.memoryUsageKb()).isNotNull();
+        assertThat(result.memoryUsageKb()).isGreaterThan(0);
     }
 }

@@ -34,6 +34,8 @@ class RemoteExecutionGatewayTest {
                         42,
                         256,
                         false,
+                        false,
+                        true,
                         false
                 ));
 
@@ -46,6 +48,7 @@ class RemoteExecutionGatewayTest {
         assertThat(result.memoryUsageKb()).isEqualTo(256);
         assertThat(result.systemError()).isFalse();
         assertThat(result.timedOut()).isFalse();
+        assertThat(result.compilationError()).isTrue();
     }
 
     @Test

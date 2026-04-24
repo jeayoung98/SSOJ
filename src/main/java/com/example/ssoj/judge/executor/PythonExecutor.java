@@ -17,6 +17,7 @@ public class PythonExecutor implements LanguageExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(PythonExecutor.class);
     private static final String SOURCE_FILE_NAME = "main.py";
+    private static final int MIN_DOCKER_MEMORY_MB = 128;
 
     private final String dockerImage;
     private final DockerProcessExecutor dockerProcessExecutor;
@@ -55,7 +56,13 @@ public class PythonExecutor implements LanguageExecutor {
             Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
             logSourceFileState(context, tempDirectory, sourceFile);
 
-            return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, "python3 main.py");
+            return dockerProcessExecutor.executeRun(
+                    context,
+                    tempDirectory,
+                    dockerImage,
+                    Math.max(context.memoryLimitMb(), MIN_DOCKER_MEMORY_MB),
+                    "python3 main.py"
+            );
         } catch (IOException exception) {
             log.warn("Python Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());

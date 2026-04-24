@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DockerProcessExecutorTest {
 
     @Test
-    void execute_completesLongRunningCommandWithinTimeLimit() throws Exception {
+    void executeRun_completesLongRunningCommandWithinTimeLimit() throws Exception {
         // 시간이 꽤 걸리는 명령이라도 제한 시간 안에 끝나면 정상 성공이어야 한다.
         DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
         Path workspaceDirectory = Files.createTempDirectory("docker-process-test-");
@@ -31,10 +31,11 @@ class DockerProcessExecutorTest {
                     128
             );
 
-            JudgeExecutionResult result = dockerProcessExecutor.execute(
+            JudgeExecutionResult result = dockerProcessExecutor.executeRun(
                     context,
                     workspaceDirectory,
                     "gcc:13",
+                    128,
                     "sleep 1 && printf done"
             );
 
@@ -46,6 +47,8 @@ class DockerProcessExecutorTest {
             assertThat(result.executionTimeMs()).isNotNull();
             assertThat(result.executionTimeMs()).isGreaterThanOrEqualTo(900);
             assertThat(result.executionTimeMs()).isLessThan(3000);
+            assertThat(result.memoryUsageKb()).isNotNull();
+            assertThat(result.memoryUsageKb()).isGreaterThan(0);
         } finally {
             if (Files.exists(workspaceDirectory)) {
                 try (var paths = Files.walk(workspaceDirectory)) {

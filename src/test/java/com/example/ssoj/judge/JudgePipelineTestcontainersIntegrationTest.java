@@ -106,7 +106,7 @@ class JudgePipelineTestcontainersIntegrationTest {
         testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 11, 128, false, false));
+        fakeLanguageExecutor.setResult(new JudgeExecutionResult(true, "3\n", "", 0, 11, 128, false, false, false, false));
 
         stringRedisTemplate.opsForList().leftPush(QUEUE_KEY, submission.getId().toString());
         judgeQueueConsumer.consume();

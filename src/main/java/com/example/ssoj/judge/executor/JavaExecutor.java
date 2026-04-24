@@ -17,17 +17,21 @@ public class JavaExecutor implements LanguageExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(JavaExecutor.class);
     private static final String SOURCE_FILE_NAME = "Main.java";
+    private static final int MIN_DOCKER_MEMORY_MB = 256;
 
     private final String dockerImage;
+    private final long compileTimeoutMs;
     private final DockerProcessExecutor dockerProcessExecutor;
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public JavaExecutor(
             @Value("${worker.executor.java.image:eclipse-temurin:17-jdk}") String dockerImage,
+            @Value("${worker.executor.compile-timeout-ms:15000}") long compileTimeoutMs,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
         this.dockerImage = dockerImage;
+        this.compileTimeoutMs = compileTimeoutMs;
         this.dockerProcessExecutor = dockerProcessExecutor;
         this.workspaceDirectoryFactory = workspaceDirectoryFactory;
     }
@@ -55,7 +59,26 @@ public class JavaExecutor implements LanguageExecutor {
             Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
             logSourceFileState(context, tempDirectory, sourceFile);
 
-            return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, "javac Main.java && java Main");
+            int dockerMemoryMb = resolveDockerMemoryMb(context);
+            JudgeExecutionResult compileResult = dockerProcessExecutor.executeCompile(
+                    context,
+                    tempDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    "javac Main.java",
+                    compileTimeoutMs
+            );
+            if (!compileResult.success()) {
+                return compileResult;
+            }
+
+            return dockerProcessExecutor.executeRun(
+                    context,
+                    tempDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    buildRunCommand(context)
+            );
         } catch (IOException exception) {
             log.warn("Java Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());
@@ -69,6 +92,14 @@ public class JavaExecutor implements LanguageExecutor {
         } finally {
             deleteDirectory(tempDirectory);
         }
+    }
+
+    private int resolveDockerMemoryMb(JudgeContext context) {
+        return Math.max(context.memoryLimitMb() * 2, MIN_DOCKER_MEMORY_MB);
+    }
+
+    private String buildRunCommand(JudgeContext context) {
+        return "java -Xmx" + context.memoryLimitMb() + "m Main";
     }
 
     private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {

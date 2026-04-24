@@ -88,14 +88,20 @@ public class JudgeService {
                     testCase.expectedOutput(),
                     startedJudging.memoryLimitMb()
             );
-            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
-            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
 
             if (caseResult != SubmissionResult.AC) {
                 finalResult = caseResult;
                 failedTestcaseOrder = hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null;
-                break;
+                return new JudgeRunResult(
+                        finalResult,
+                        executionResult.executionTimeMs(),
+                        executionResult.memoryUsageKb(),
+                        failedTestcaseOrder
+                );
             }
+
+            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
+            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
         }
 
         return new JudgeRunResult(finalResult, maxExecutionTimeMs, maxMemoryKb, failedTestcaseOrder);
@@ -111,6 +117,10 @@ public class JudgeService {
             return SubmissionResult.SYSTEM_ERROR;
         }
 
+        if (executionResult.compilationError()) {
+            return SubmissionResult.CE;
+        }
+
         if (executionResult.timedOut()) {
             return SubmissionResult.TLE;
         }
@@ -120,12 +130,6 @@ public class JudgeService {
         }
 
         if (!executionResult.success()) {
-            if ("java".equalsIgnoreCase(language)
-                    && executionResult.stderr() != null
-                    && executionResult.stderr().contains("error:")) {
-                return SubmissionResult.CE;
-            }
-
             return SubmissionResult.RE;
         }
 
@@ -146,6 +150,10 @@ public class JudgeService {
     private boolean isMemoryLimitExceeded(JudgeExecutionResult executionResult, Integer memoryLimitMb) {
         if (memoryLimitMb == null) {
             return false;
+        }
+
+        if (executionResult.memoryLimitExceeded()) {
+            return true;
         }
 
         if (executionResult.memoryUsageKb() != null) {

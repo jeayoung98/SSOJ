@@ -53,7 +53,9 @@ public class RemoteExecutionGateway implements ExecutionGateway {
                     response.executionTimeMs(),
                     response.memoryUsageKb(),
                     response.systemError(),
-                    response.timedOut()
+                    response.timedOut(),
+                    response.compilationError(),
+                    response.memoryLimitExceeded()
             );
         } catch (Exception exception) {
             return JudgeExecutionResult.systemError(exception.getMessage());

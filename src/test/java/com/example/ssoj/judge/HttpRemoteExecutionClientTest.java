@@ -48,7 +48,9 @@ class HttpRemoteExecutionClientTest {
                           "executionTimeMs": 12,
                           "memoryUsageKb": 512,
                           "systemError": false,
-                          "timedOut": false
+                          "timedOut": false,
+                          "compilationError": false,
+                          "memoryLimitExceeded": false
                         }
                         """, MediaType.APPLICATION_JSON));
 
@@ -70,5 +72,7 @@ class HttpRemoteExecutionClientTest {
         assertThat(response.memoryUsageKb()).isEqualTo(512);
         assertThat(response.systemError()).isFalse();
         assertThat(response.timedOut()).isFalse();
+        assertThat(response.compilationError()).isFalse();
+        assertThat(response.memoryLimitExceeded()).isFalse();
     }
 }

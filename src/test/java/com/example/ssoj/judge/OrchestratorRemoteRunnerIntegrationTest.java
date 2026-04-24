@@ -181,7 +181,9 @@ class OrchestratorRemoteRunnerIntegrationTest {
                   "executionTimeMs": 5,
                   "memoryUsageKb": 128,
                   "systemError": false,
-                  "timedOut": false
+                  "timedOut": false,
+                  "compilationError": false,
+                  "memoryLimitExceeded": false
                 }
                 """.formatted(sum);
     }

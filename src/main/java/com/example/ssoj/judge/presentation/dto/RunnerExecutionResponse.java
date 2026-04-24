@@ -10,7 +10,9 @@ public record RunnerExecutionResponse(
         Integer executionTimeMs,
         Integer memoryUsageKb,
         boolean systemError,
-        boolean timedOut
+        boolean timedOut,
+        boolean compilationError,
+        boolean memoryLimitExceeded
 ) {
 
     public static RunnerExecutionResponse from(JudgeExecutionResult result) {
@@ -22,7 +24,9 @@ public record RunnerExecutionResponse(
                 result.executionTimeMs(),
                 result.memoryUsageKb(),
                 result.systemError(),
-                result.timedOut()
+                result.timedOut(),
+                result.compilationError(),
+                result.memoryLimitExceeded()
         );
     }
 

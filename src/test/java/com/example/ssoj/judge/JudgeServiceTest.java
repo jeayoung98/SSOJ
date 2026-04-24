@@ -75,7 +75,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_11)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "4\n", "", 0, 12, 64, false, false));
+                .thenReturn(new JudgeExecutionResult(true, "4\n", "", 0, 12, 64, false, false, false, false));
 
         judgeService.judge(SUBMISSION_11);
 
@@ -112,7 +112,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_12)).thenReturn(startedJudging);
         when(executionGateway.supports("java")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(false, "", "Main.java:1: error: ';' expected", 1, 5, 64, false, false));
+                .thenReturn(new JudgeExecutionResult(false, "", "Main.java:1: error: ';' expected", 1, 5, 64, false, false, true, false));
 
         judgeService.judge(SUBMISSION_12);
 
@@ -228,7 +228,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_21)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(false, "", "RuntimeError", 1, 9, 96, false, false));
+                .thenReturn(new JudgeExecutionResult(false, "", "RuntimeError", 1, 9, 96, false, false, false, false));
 
         judgeService.judge(SUBMISSION_21);
 
@@ -288,7 +288,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_17)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "OK\n", "", 0, 2400, 64, false, false));
+                .thenReturn(new JudgeExecutionResult(true, "OK\n", "", 0, 2400, 64, false, false, false, false));
 
         judgeService.judge(SUBMISSION_17);
 
@@ -324,8 +324,8 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_18)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 3, 32, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "wrong\n", "", 0, 4, 32, false, false));
+                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 3, 32, false, false, false, false))
+                .thenReturn(new JudgeExecutionResult(true, "wrong\n", "", 0, 4, 32, false, false, false, false));
 
         judgeService.judge(SUBMISSION_18);
 
@@ -360,9 +360,9 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_19)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 10, 100, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "2\n", "", 0, 25, 64, false, false))
-                .thenReturn(new JudgeExecutionResult(true, "3\n", "", 0, 7, 512, false, false));
+                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 10, 100, false, false, false, false))
+                .thenReturn(new JudgeExecutionResult(true, "2\n", "", 0, 25, 64, false, false, false, false))
+                .thenReturn(new JudgeExecutionResult(true, "3\n", "", 0, 7, 512, false, false, false, false));
 
         judgeService.judge(SUBMISSION_19);
 
@@ -396,7 +396,7 @@ class JudgeServiceTest {
         when(judgePersistenceService.startJudging(SUBMISSION_20)).thenReturn(startedJudging);
         when(executionGateway.supports("python")).thenReturn(true);
         when(executionGateway.execute(any(JudgeContext.class)))
-                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 8, 128 * 1024 + 1, false, false));
+                .thenReturn(new JudgeExecutionResult(true, "1\n", "", 0, 8, 128 * 1024 + 1, false, false, false, false));
 
         judgeService.judge(SUBMISSION_20);
 
@@ -409,6 +409,35 @@ class JudgeServiceTest {
         assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
         assertThat(runResult.executionTimeMs()).isEqualTo(8);
         assertThat(runResult.memoryKb()).isEqualTo(128 * 1024 + 1);
+    }
+
+    @Test
+    void judge_stopsWithMleWhenExecutionReportsContainerOom() {
+        StartedJudging startedJudging = startedJudging(
+                SUBMISSION_20,
+                "python",
+                List.of(hiddenTestCase(CASE_301, 1, "1", "1"))
+        );
+
+        JudgeService judgeService = new JudgeService(
+                judgePersistenceService,
+                executionGateway
+        );
+
+        when(judgePersistenceService.startJudging(SUBMISSION_20)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.execute(any(JudgeContext.class)))
+                .thenReturn(new JudgeExecutionResult(false, "", "Killed", 137, 20, 0, false, false, false, true));
+
+        judgeService.judge(SUBMISSION_20);
+
+        ArgumentCaptor<JudgeRunResult> runResultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(judgePersistenceService).saveResultsAndFinish(eq(SUBMISSION_20), runResultCaptor.capture(), any(Instant.class));
+
+        JudgeRunResult runResult = runResultCaptor.getValue();
+        assertThat(runResult.finalResult()).isEqualTo(SubmissionResult.MLE);
+        assertThat(runResult.failedTestcaseOrder()).isEqualTo(1);
+        assertThat(runResult.executionTimeMs()).isEqualTo(20);
     }
 
     private static StartedJudging startedJudging(

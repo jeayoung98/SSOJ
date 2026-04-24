@@ -95,7 +95,7 @@ class JudgePipelineIntegrationTest {
         testCaseRepository.save(testCase(problem, "1 2", "3\n", true));
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
-        fakeLanguageExecutor.setResults(new JudgeExecutionResult(true, "3\n", "", 0, 7, 256, false, false));
+        fakeLanguageExecutor.setResults(new JudgeExecutionResult(true, "3\n", "", 0, 7, 256, false, false, false, false));
 
         when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
         judgeQueueConsumer.consume();
@@ -146,9 +146,9 @@ class JudgePipelineIntegrationTest {
 
         Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
         fakeLanguageExecutor.setResults(
-                new JudgeExecutionResult(true, "1\n", "", 0, 5, 128, false, false),
-                new JudgeExecutionResult(true, "wrong\n", "", 0, 6, 64, false, false),
-                new JudgeExecutionResult(true, "3\n", "", 0, 7, 64, false, false)
+                new JudgeExecutionResult(true, "1\n", "", 0, 5, 128, false, false, false, false),
+                new JudgeExecutionResult(true, "wrong\n", "", 0, 6, 64, false, false, false, false),
+                new JudgeExecutionResult(true, "3\n", "", 0, 7, 64, false, false, false, false)
         );
 
         when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
@@ -160,7 +160,7 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getResult()).isEqualTo(SubmissionResult.WA);
         assertThat(finishedSubmission.getFailedTestcaseOrder()).isEqualTo(2);
         assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(6);
-        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(64);
         assertThat(finishedSubmission.getJudgedAt()).isNotNull();
         assertThat(fakeLanguageExecutor.executedContexts()).hasSize(2);
     }

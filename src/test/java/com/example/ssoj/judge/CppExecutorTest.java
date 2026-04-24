@@ -23,10 +23,11 @@ class CppExecutorTest {
     void execute_deletesTempDirectoryAfterSuccessfulExecution() throws IOException, InterruptedException {
         // 실제 Docker 호출 대신 workspace 생성과 cleanup 보장 여부만 검증한다.
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
-                new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false)
+                new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false, false, false)
         );
         CppExecutor cppExecutor = new CppExecutor(
                 "gcc:13",
+                15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
                 dockerProcessExecutor,
@@ -39,6 +40,10 @@ class CppExecutorTest {
         assertThat(dockerProcessExecutor.workspaceDirectory).isNotNull();
         assertThat(dockerProcessExecutor.workspaceExistsDuringExecution).isTrue();
         assertThat(dockerProcessExecutor.sourceFileExistsDuringExecution).isTrue();
+        assertThat(dockerProcessExecutor.compileCommand).isEqualTo("g++ main.cpp -O2 -std=c++17 -o main");
+        assertThat(dockerProcessExecutor.runCommand).isEqualTo("./main");
+        assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(128);
+        assertThat(dockerProcessExecutor.compileTimeoutMs).isEqualTo(15000L);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
@@ -50,6 +55,7 @@ class CppExecutorTest {
         );
         CppExecutor cppExecutor = new CppExecutor(
                 "gcc:13",
+                15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
                 dockerProcessExecutor,
@@ -77,6 +83,10 @@ class CppExecutorTest {
         private Path workspaceDirectory;
         private boolean workspaceExistsDuringExecution;
         private boolean sourceFileExistsDuringExecution;
+        private int dockerMemoryMb;
+        private String compileCommand;
+        private long compileTimeoutMs;
+        private String runCommand;
 
         RecordingDockerProcessExecutor(JudgeExecutionResult result) {
             this.result = result;
@@ -89,15 +99,20 @@ class CppExecutorTest {
         }
 
         @Override
-        public JudgeExecutionResult execute(
+        public JudgeExecutionResult executeCompile(
                 JudgeContext context,
                 Path workspaceDirectory,
                 String dockerImage,
-                String containerCommand
+                int dockerMemoryMb,
+                String compileCommand,
+                long compileTimeoutMs
         ) throws IOException, InterruptedException {
             this.workspaceDirectory = workspaceDirectory;
             this.workspaceExistsDuringExecution = Files.exists(workspaceDirectory);
             this.sourceFileExistsDuringExecution = Files.exists(workspaceDirectory.resolve("main.cpp"));
+            this.dockerMemoryMb = dockerMemoryMb;
+            this.compileCommand = compileCommand;
+            this.compileTimeoutMs = compileTimeoutMs;
 
             if (exception instanceof IOException ioException) {
                 throw ioException;
@@ -109,6 +124,19 @@ class CppExecutorTest {
                 throw runtimeException;
             }
 
+            return new JudgeExecutionResult(true, "", "", 0, null, null, false, false, false, false);
+        }
+
+        @Override
+        public JudgeExecutionResult executeRun(
+                JudgeContext context,
+                Path workspaceDirectory,
+                String dockerImage,
+                int dockerMemoryMb,
+                String runCommand
+        ) {
+            this.dockerMemoryMb = dockerMemoryMb;
+            this.runCommand = runCommand;
             return result;
         }
     }

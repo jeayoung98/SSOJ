@@ -19,6 +19,7 @@ public class CppExecutor implements LanguageExecutor {
     private static final String SOURCE_FILE_NAME = "main.cpp";
 
     private final String dockerImage;
+    private final long compileTimeoutMs;
     private final String compileCommand;
     private final String runCommand;
     private final DockerProcessExecutor dockerProcessExecutor;
@@ -26,12 +27,14 @@ public class CppExecutor implements LanguageExecutor {
 
     public CppExecutor(
             @Value("${worker.executor.cpp.image:gcc:13}") String dockerImage,
+            @Value("${worker.executor.compile-timeout-ms:15000}") long compileTimeoutMs,
             @Value("${worker.executor.cpp.compile-command:g++ main.cpp -O2 -std=c++17 -o main}") String compileCommand,
             @Value("${worker.executor.cpp.run-command:./main}") String runCommand,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
         this.dockerImage = dockerImage;
+        this.compileTimeoutMs = compileTimeoutMs;
         this.compileCommand = compileCommand;
         this.runCommand = runCommand;
         this.dockerProcessExecutor = dockerProcessExecutor;
@@ -67,7 +70,26 @@ public class CppExecutor implements LanguageExecutor {
                     compileCommand,
                     runCommand
             );
-            return dockerProcessExecutor.execute(context, tempDirectory, dockerImage, buildContainerCommand());
+            int dockerMemoryMb = context.memoryLimitMb();
+            JudgeExecutionResult compileResult = dockerProcessExecutor.executeCompile(
+                    context,
+                    tempDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    compileCommand,
+                    compileTimeoutMs
+            );
+            if (!compileResult.success()) {
+                return compileResult;
+            }
+
+            return dockerProcessExecutor.executeRun(
+                    context,
+                    tempDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    runCommand
+            );
         } catch (IOException exception) {
             log.warn("C++ Docker execution failed for submission {}", context.submissionId(), exception);
             return JudgeExecutionResult.systemError(exception.getMessage());
@@ -81,10 +103,6 @@ public class CppExecutor implements LanguageExecutor {
         } finally {
             deleteDirectory(tempDirectory);
         }
-    }
-
-    private String buildContainerCommand() {
-        return compileCommand + " && " + runCommand;
     }
 
     private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
