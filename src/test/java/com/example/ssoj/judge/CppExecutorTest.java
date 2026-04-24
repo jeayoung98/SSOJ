@@ -1,15 +1,22 @@
 package com.example.ssoj.judge;
 
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.CppExecutor;
 import com.example.ssoj.judge.executor.DockerProcessExecutor;
 import com.example.ssoj.judge.executor.WorkspaceDirectoryFactory;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.Queue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,10 +27,12 @@ class CppExecutorTest {
     );
 
     @Test
-    void execute_deletesTempDirectoryAfterSuccessfulExecution() throws IOException, InterruptedException {
-        // 실제 Docker 호출 대신 workspace 생성과 cleanup 보장 여부만 검증한다.
+    void executeSubmission_deletesTempDirectoryAfterSuccessfulExecution() {
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
-                new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false, false, false)
+                List.of(
+                        new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false, false, false),
+                        new JudgeExecutionResult(true, "5\n", "", 0, 18, 256, false, false, false, false)
+                )
         );
         CppExecutor cppExecutor = new CppExecutor(
                 "gcc:13",
@@ -34,25 +43,19 @@ class CppExecutorTest {
                 workspaceDirectoryFactory
         );
 
-        JudgeExecutionResult result = cppExecutor.execute(context("int main() { return 0; }"));
+        JudgeRunResult result = cppExecutor.executeSubmission(context());
 
-        assertThat(result.success()).isTrue();
-        assertThat(dockerProcessExecutor.workspaceDirectory).isNotNull();
-        assertThat(dockerProcessExecutor.workspaceExistsDuringExecution).isTrue();
-        assertThat(dockerProcessExecutor.sourceFileExistsDuringExecution).isTrue();
-        assertThat(dockerProcessExecutor.compileCommand).isEqualTo("g++ main.cpp -O2 -std=c++17 -o main");
-        assertThat(dockerProcessExecutor.runCommand).isEqualTo("./main");
-        assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(128);
-        assertThat(dockerProcessExecutor.compileTimeoutMs).isEqualTo(15000L);
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.AC);
+        assertThat(result.executionTimeMs()).isEqualTo(18);
+        assertThat(result.memoryKb()).isEqualTo(256);
+        assertThat(dockerProcessExecutor.compileCallCount).isEqualTo(1);
+        assertThat(dockerProcessExecutor.runCallCount).isEqualTo(2);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
     @Test
-    void execute_deletesTempDirectoryWhenDockerExecutionThrows() throws IOException, InterruptedException {
-        // 실패 경로에서도 finally cleanup이 동작해야 한다.
-        RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
-                new IOException("docker start failed")
-        );
+    void executeSubmission_deletesTempDirectoryWhenDockerExecutionThrows() {
+        ThrowingDockerProcessExecutor dockerProcessExecutor = new ThrowingDockerProcessExecutor();
         CppExecutor cppExecutor = new CppExecutor(
                 "gcc:13",
                 15000L,
@@ -62,82 +65,59 @@ class CppExecutorTest {
                 workspaceDirectoryFactory
         );
 
-        JudgeExecutionResult result = cppExecutor.execute(context("int main() { return 0; }"));
+        JudgeRunResult result = cppExecutor.executeSubmission(context());
 
-        assertThat(result.systemError()).isTrue();
-        assertThat(dockerProcessExecutor.workspaceDirectory).isNotNull();
-        assertThat(dockerProcessExecutor.workspaceExistsDuringExecution).isTrue();
-        assertThat(dockerProcessExecutor.sourceFileExistsDuringExecution).isTrue();
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
-    private static JudgeContext context(String sourceCode) {
-        return new JudgeContext(1L, 10L, "cpp", sourceCode, "1 2\n", 1000, 128);
+    private JudgeRunContext context() {
+        return new JudgeRunContext(
+                1L,
+                10L,
+                "cpp",
+                "int main() { return 0; }",
+                List.of(
+                        new HiddenTestCaseSnapshot(1L, 1, "1 2\n", "3\n"),
+                        new HiddenTestCaseSnapshot(2L, 2, "2 3\n", "5\n")
+                ),
+                1000,
+                128
+        );
     }
 
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
-        // execute 호출 시점의 workspace 상태를 기록해 cleanup 전후를 비교한다.
-
-        private final JudgeExecutionResult result;
-        private final Exception exception;
+        private final Queue<JudgeExecutionResult> runResults;
         private Path workspaceDirectory;
-        private boolean workspaceExistsDuringExecution;
-        private boolean sourceFileExistsDuringExecution;
-        private int dockerMemoryMb;
-        private String compileCommand;
-        private long compileTimeoutMs;
-        private String runCommand;
+        private int compileCallCount;
+        private int runCallCount;
 
-        RecordingDockerProcessExecutor(JudgeExecutionResult result) {
-            this.result = result;
-            this.exception = null;
-        }
-
-        RecordingDockerProcessExecutor(Exception exception) {
-            this.result = null;
-            this.exception = exception;
+        RecordingDockerProcessExecutor(List<JudgeExecutionResult> runResults) {
+            this.runResults = new ArrayDeque<>(runResults);
         }
 
         @Override
-        public JudgeExecutionResult executeCompile(
-                JudgeContext context,
-                Path workspaceDirectory,
-                String dockerImage,
-                int dockerMemoryMb,
-                String compileCommand,
-                long compileTimeoutMs
-        ) throws IOException, InterruptedException {
+        public JudgeExecutionResult executeCompile(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String compileCommand, long compileTimeoutMs) {
             this.workspaceDirectory = workspaceDirectory;
-            this.workspaceExistsDuringExecution = Files.exists(workspaceDirectory);
-            this.sourceFileExistsDuringExecution = Files.exists(workspaceDirectory.resolve("main.cpp"));
-            this.dockerMemoryMb = dockerMemoryMb;
-            this.compileCommand = compileCommand;
-            this.compileTimeoutMs = compileTimeoutMs;
-
-            if (exception instanceof IOException ioException) {
-                throw ioException;
-            }
-            if (exception instanceof InterruptedException interruptedException) {
-                throw interruptedException;
-            }
-            if (exception instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-
+            this.compileCallCount++;
             return new JudgeExecutionResult(true, "", "", 0, null, null, false, false, false, false);
         }
 
         @Override
-        public JudgeExecutionResult executeRun(
-                JudgeContext context,
-                Path workspaceDirectory,
-                String dockerImage,
-                int dockerMemoryMb,
-                String runCommand
-        ) {
-            this.dockerMemoryMb = dockerMemoryMb;
-            this.runCommand = runCommand;
-            return result;
+        public JudgeExecutionResult executeRun(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String runCommand) {
+            this.workspaceDirectory = workspaceDirectory;
+            this.runCallCount++;
+            return runResults.remove();
+        }
+    }
+
+    static class ThrowingDockerProcessExecutor extends DockerProcessExecutor {
+        private Path workspaceDirectory;
+
+        @Override
+        public JudgeExecutionResult executeCompile(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String compileCommand, long compileTimeoutMs) throws IOException {
+            this.workspaceDirectory = workspaceDirectory;
+            throw new IOException("docker start failed");
         }
     }
 }

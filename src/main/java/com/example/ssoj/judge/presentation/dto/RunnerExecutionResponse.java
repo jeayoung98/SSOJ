@@ -1,36 +1,25 @@
 package com.example.ssoj.judge.presentation.dto;
 
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
+import com.example.ssoj.submission.domain.SubmissionResult;
 
 public record RunnerExecutionResponse(
-        boolean success,
-        String stdout,
-        String stderr,
-        Integer exitCode,
+        SubmissionResult result,
         Integer executionTimeMs,
         Integer memoryUsageKb,
-        boolean systemError,
-        boolean timedOut,
-        boolean compilationError,
-        boolean memoryLimitExceeded
+        Integer failedTestcaseOrder
 ) {
 
-    public static RunnerExecutionResponse from(JudgeExecutionResult result) {
+    public static RunnerExecutionResponse from(JudgeRunResult result) {
         return new RunnerExecutionResponse(
-                result.success(),
-                result.stdout(),
-                result.stderr(),
-                result.exitCode(),
+                result.finalResult(),
                 result.executionTimeMs(),
-                result.memoryUsageKb(),
-                result.systemError(),
-                result.timedOut(),
-                result.compilationError(),
-                result.memoryLimitExceeded()
+                result.memoryKb(),
+                result.failedTestcaseOrder()
         );
     }
 
-    public static RunnerExecutionResponse systemError(String stderr) {
-        return from(JudgeExecutionResult.systemError(stderr));
+    public static RunnerExecutionResponse systemError() {
+        return from(JudgeRunResult.systemError());
     }
 }

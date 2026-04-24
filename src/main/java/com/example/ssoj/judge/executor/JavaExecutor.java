@@ -1,7 +1,12 @@
 package com.example.ssoj.judge.executor;
 
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
+import com.example.ssoj.judge.domain.model.JudgeExecutionPolicy;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,7 +47,7 @@ public class JavaExecutor implements LanguageExecutor {
     }
 
     @Override
-    public JudgeExecutionResult execute(JudgeContext context) {
+    public JudgeRunResult executeSubmission(JudgeRunContext context) {
         Path tempDirectory = null;
         try {
             if (context.sourceCode() == null) {
@@ -51,7 +56,7 @@ public class JavaExecutor implements LanguageExecutor {
                         context.submissionId(),
                         context.language()
                 );
-                return JudgeExecutionResult.systemError("sourceCode must not be null");
+                return JudgeRunResult.systemError();
             }
 
             tempDirectory = workspaceDirectoryFactory.create("judge-java-");
@@ -59,9 +64,9 @@ public class JavaExecutor implements LanguageExecutor {
             Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
             logSourceFileState(context, tempDirectory, sourceFile);
 
-            int dockerMemoryMb = resolveDockerMemoryMb(context);
+            int dockerMemoryMb = resolveDockerMemoryMb(context.memoryLimitMb());
             JudgeExecutionResult compileResult = dockerProcessExecutor.executeCompile(
-                    context,
+                    testCaseContext(context, ""),
                     tempDirectory,
                     dockerImage,
                     dockerMemoryMb,
@@ -69,40 +74,107 @@ public class JavaExecutor implements LanguageExecutor {
                     compileTimeoutMs
             );
             if (!compileResult.success()) {
-                return compileResult;
+                return compileFailureResult(compileResult);
             }
 
-            return dockerProcessExecutor.executeRun(
-                    context,
-                    tempDirectory,
-                    dockerImage,
-                    dockerMemoryMb,
-                    buildRunCommand(context)
-            );
+            return executeHiddenTestCases(context, tempDirectory, dockerMemoryMb);
         } catch (IOException exception) {
             log.warn("Java Docker execution failed for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             log.warn("Java execution interrupted for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } catch (Exception exception) {
             log.warn("Java execution failed for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } finally {
             deleteDirectory(tempDirectory);
         }
     }
 
-    private int resolveDockerMemoryMb(JudgeContext context) {
-        return Math.max(context.memoryLimitMb() * 2, MIN_DOCKER_MEMORY_MB);
+    private int resolveDockerMemoryMb(Integer memoryLimitMb) {
+        return Math.max(memoryLimitMb * 2, MIN_DOCKER_MEMORY_MB);
     }
 
     private String buildRunCommand(JudgeContext context) {
         return "java -Xmx" + context.memoryLimitMb() + "m Main";
     }
 
-    private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
+    private JudgeRunResult executeHiddenTestCases(JudgeRunContext context, Path workspaceDirectory, int dockerMemoryMb)
+            throws IOException, InterruptedException {
+        Integer maxExecutionTimeMs = null;
+        Integer maxMemoryKb = null;
+        String runCommand = buildRunCommand(new JudgeContext(
+                context.submissionId(),
+                context.problemId(),
+                context.language(),
+                context.sourceCode(),
+                "",
+                context.timeLimitMs(),
+                context.memoryLimitMb()
+        ));
+
+        for (HiddenTestCaseSnapshot testCase : context.hiddenTestCases()) {
+            JudgeExecutionResult executionResult = dockerProcessExecutor.executeRun(
+                    testCaseContext(context, testCase.input()),
+                    workspaceDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    runCommand
+            );
+            SubmissionResult caseResult = JudgeExecutionPolicy.determineCaseResult(
+                    context.language(),
+                    executionResult,
+                    testCase.expectedOutput(),
+                    context.memoryLimitMb()
+            );
+            if (caseResult != SubmissionResult.AC) {
+                return new JudgeRunResult(
+                        caseResult,
+                        executionResult.executionTimeMs(),
+                        executionResult.memoryUsageKb(),
+                        JudgeExecutionPolicy.hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null
+                );
+            }
+
+            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
+            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
+        }
+
+        return new JudgeRunResult(SubmissionResult.AC, maxExecutionTimeMs, maxMemoryKb, null);
+    }
+
+    private JudgeContext testCaseContext(JudgeRunContext context, String input) {
+        return new JudgeContext(
+                context.submissionId(),
+                context.problemId(),
+                context.language(),
+                context.sourceCode(),
+                input,
+                context.timeLimitMs(),
+                context.memoryLimitMb()
+        );
+    }
+
+    private JudgeRunResult compileFailureResult(JudgeExecutionResult compileResult) {
+        if (compileResult.compilationError()) {
+            return new JudgeRunResult(SubmissionResult.CE, null, null, null);
+        }
+        return JudgeRunResult.systemError();
+    }
+
+    private Integer max(Integer current, Integer candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null) {
+            return candidate;
+        }
+        return Math.max(current, candidate);
+    }
+
+    private void logSourceFileState(JudgeRunContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
         log.info(
                 "Prepared Java workspace for submission {} language={} workspaceDirectory={} sourceFile={} sourceExists={} sourceSizeBytes={}",
                 context.submissionId(),

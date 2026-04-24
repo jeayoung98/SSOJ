@@ -1,13 +1,17 @@
 package com.example.ssoj.judge;
 
+import com.example.ssoj.judge.infrastructure.remote.HttpRemoteExecutionClient;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
-import com.example.ssoj.judge.infrastructure.remote.HttpRemoteExecutionClient;
+import com.example.ssoj.judge.presentation.dto.RunnerTestCaseRequest;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -18,7 +22,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class HttpRemoteExecutionClientTest {
 
     @Test
-    void execute_postsRunnerExecutionRequestAndReadsRunnerExecutionResponse() {
+    void execute_postsSubmissionRequestAndReadsRunResult() {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         HttpRemoteExecutionClient client = new HttpRemoteExecutionClient(
@@ -34,23 +38,19 @@ class HttpRemoteExecutionClientTest {
                           "problemId": 22,
                           "language": "java",
                           "sourceCode": "class Main {}",
-                          "input": "1 2",
+                          "testCases": [
+                            { "testCaseOrder": 1, "input": "1 2", "expectedOutput": "3" }
+                          ],
                           "timeLimitMs": 1000,
                           "memoryLimitMb": 128
                         }
                         """))
                 .andRespond(withSuccess("""
                         {
-                          "success": true,
-                          "stdout": "3\\n",
-                          "stderr": "",
-                          "exitCode": 0,
+                          "result": "AC",
                           "executionTimeMs": 12,
                           "memoryUsageKb": 512,
-                          "systemError": false,
-                          "timedOut": false,
-                          "compilationError": false,
-                          "memoryLimitExceeded": false
+                          "failedTestcaseOrder": null
                         }
                         """, MediaType.APPLICATION_JSON));
 
@@ -59,20 +59,15 @@ class HttpRemoteExecutionClientTest {
                 22L,
                 "java",
                 "class Main {}",
-                "1 2",
+                List.of(new RunnerTestCaseRequest(1, "1 2", "3")),
                 1000,
                 128
         ));
 
         server.verify();
-        assertThat(response.success()).isTrue();
-        assertThat(response.stdout()).isEqualTo("3\n");
-        assertThat(response.exitCode()).isEqualTo(0);
+        assertThat(response.result()).isEqualTo(SubmissionResult.AC);
         assertThat(response.executionTimeMs()).isEqualTo(12);
         assertThat(response.memoryUsageKb()).isEqualTo(512);
-        assertThat(response.systemError()).isFalse();
-        assertThat(response.timedOut()).isFalse();
-        assertThat(response.compilationError()).isFalse();
-        assertThat(response.memoryLimitExceeded()).isFalse();
+        assertThat(response.failedTestcaseOrder()).isNull();
     }
 }

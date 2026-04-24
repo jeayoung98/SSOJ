@@ -1,7 +1,8 @@
 package com.example.ssoj.judge.application.sevice;
 
 import com.example.ssoj.judge.application.selector.RunnerLanguageExecutorSelector;
-import com.example.ssoj.judge.domain.model.JudgeContext;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.LanguageExecutor;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
@@ -22,24 +23,25 @@ public class RunnerExecutionService {
         this.runnerLanguageExecutorSelector = runnerLanguageExecutorSelector;
     }
 
-    public RunnerExecutionResponse execute(RunnerExecutionRequest request) {
+    public RunnerExecutionResponse executeSubmission(RunnerExecutionRequest request) {
         LanguageExecutor executor = runnerLanguageExecutorSelector.find(request.language());
         if (executor == null) {
-            return RunnerExecutionResponse.systemError("Unsupported language: " + request.language());
+            return RunnerExecutionResponse.systemError();
         }
 
-        JudgeContext context = new JudgeContext(
+        JudgeRunContext context = new JudgeRunContext(
                 request.submissionId(),
                 request.problemId(),
                 request.language(),
                 request.sourceCode(),
-                request.input(),
+                request.toHiddenTestCases(),
                 request.timeLimitMs(),
                 request.memoryLimitMb()
         );
 
         try {
-            return RunnerExecutionResponse.from(executor.execute(context));
+            JudgeRunResult result = executor.executeSubmission(context);
+            return RunnerExecutionResponse.from(result);
         } catch (Exception exception) {
             log.error(
                     "Runner execution failed for submission {} and language {}",
@@ -47,7 +49,7 @@ public class RunnerExecutionService {
                     request.language(),
                     exception
             );
-            return RunnerExecutionResponse.systemError(exception.getMessage());
+            return RunnerExecutionResponse.systemError();
         }
     }
 }

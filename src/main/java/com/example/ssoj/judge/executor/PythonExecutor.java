@@ -1,7 +1,12 @@
 package com.example.ssoj.judge.executor;
 
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
+import com.example.ssoj.judge.domain.model.JudgeExecutionPolicy;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,7 +44,7 @@ public class PythonExecutor implements LanguageExecutor {
     }
 
     @Override
-    public JudgeExecutionResult execute(JudgeContext context) {
+    public JudgeRunResult executeSubmission(JudgeRunContext context) {
         Path tempDirectory = null;
         try {
             if (context.sourceCode() == null) {
@@ -48,7 +53,7 @@ public class PythonExecutor implements LanguageExecutor {
                         context.submissionId(),
                         context.language()
                 );
-                return JudgeExecutionResult.systemError("sourceCode must not be null");
+                return JudgeRunResult.systemError();
             }
 
             tempDirectory = workspaceDirectoryFactory.create("judge-python-");
@@ -56,29 +61,80 @@ public class PythonExecutor implements LanguageExecutor {
             Files.writeString(sourceFile, context.sourceCode(), StandardCharsets.UTF_8);
             logSourceFileState(context, tempDirectory, sourceFile);
 
-            return dockerProcessExecutor.executeRun(
-                    context,
-                    tempDirectory,
-                    dockerImage,
-                    Math.max(context.memoryLimitMb(), MIN_DOCKER_MEMORY_MB),
-                    "python3 main.py"
-            );
+            return executeHiddenTestCases(context, tempDirectory, Math.max(context.memoryLimitMb(), MIN_DOCKER_MEMORY_MB));
         } catch (IOException exception) {
             log.warn("Python Docker execution failed for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             log.warn("Python execution interrupted for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } catch (Exception exception) {
             log.warn("Python execution failed for submission {}", context.submissionId(), exception);
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         } finally {
             deleteDirectory(tempDirectory);
         }
     }
 
-    private void logSourceFileState(JudgeContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
+    private JudgeRunResult executeHiddenTestCases(JudgeRunContext context, Path workspaceDirectory, int dockerMemoryMb)
+            throws IOException, InterruptedException {
+        Integer maxExecutionTimeMs = null;
+        Integer maxMemoryKb = null;
+
+        for (HiddenTestCaseSnapshot testCase : context.hiddenTestCases()) {
+            JudgeExecutionResult executionResult = dockerProcessExecutor.executeRun(
+                    testCaseContext(context, testCase.input()),
+                    workspaceDirectory,
+                    dockerImage,
+                    dockerMemoryMb,
+                    "python3 main.py"
+            );
+            SubmissionResult caseResult = JudgeExecutionPolicy.determineCaseResult(
+                    context.language(),
+                    executionResult,
+                    testCase.expectedOutput(),
+                    context.memoryLimitMb()
+            );
+            if (caseResult != SubmissionResult.AC) {
+                return new JudgeRunResult(
+                        caseResult,
+                        executionResult.executionTimeMs(),
+                        executionResult.memoryUsageKb(),
+                        JudgeExecutionPolicy.hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null
+                );
+            }
+
+            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
+            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
+        }
+
+        return new JudgeRunResult(SubmissionResult.AC, maxExecutionTimeMs, maxMemoryKb, null);
+    }
+
+    private JudgeContext testCaseContext(JudgeRunContext context, String input) {
+        return new JudgeContext(
+                context.submissionId(),
+                context.problemId(),
+                context.language(),
+                context.sourceCode(),
+                input,
+                context.timeLimitMs(),
+                context.memoryLimitMb()
+        );
+    }
+
+    private Integer max(Integer current, Integer candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null) {
+            return candidate;
+        }
+        return Math.max(current, candidate);
+    }
+
+    private void logSourceFileState(JudgeRunContext context, Path workspaceDirectory, Path sourceFile) throws IOException {
         log.info(
                 "Prepared Python workspace for submission {} language={} workspaceDirectory={} sourceFile={} sourceExists={} sourceSizeBytes={}",
                 context.submissionId(),

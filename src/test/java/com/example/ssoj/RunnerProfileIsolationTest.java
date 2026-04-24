@@ -56,13 +56,15 @@ class RunnerProfileIsolationTest {
                                   "problemId": 1,
                                   "language": "unsupported",
                                   "sourceCode": "print(1)",
-                                  "input": "",
+                                  "testCases": [
+                                    { "testCaseOrder": 1, "input": "", "expectedOutput": "1\\n" }
+                                  ],
                                   "timeLimitMs": 1000,
                                   "memoryLimitMb": 128
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.systemError").value(true));
+                .andExpect(jsonPath("$.result").value("SYSTEM_ERROR"))
+                .andExpect(jsonPath("$.failedTestcaseOrder").doesNotExist());
     }
 }

@@ -1,8 +1,8 @@
 package com.example.ssoj.judge.infrastructure.docker;
 
 import com.example.ssoj.judge.application.port.ExecutionGateway;
-import com.example.ssoj.judge.domain.model.JudgeContext;
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.LanguageExecutor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -25,13 +25,13 @@ public class DockerExecutionGateway implements ExecutionGateway {
     }
 
     @Override
-    public JudgeExecutionResult execute(JudgeContext context) {
+    public JudgeRunResult executeSubmission(JudgeRunContext context) {
         LanguageExecutor executor = findExecutor(context.language());
         if (executor == null) {
-            return JudgeExecutionResult.systemError("Unsupported language: " + context.language());
+            return JudgeRunResult.systemError();
         }
 
-        return executor.execute(context);
+        return executor.executeSubmission(context);
     }
 
     private LanguageExecutor findExecutor(String language) {

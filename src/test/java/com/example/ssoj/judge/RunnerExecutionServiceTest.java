@@ -2,96 +2,100 @@ package com.example.ssoj.judge;
 
 import com.example.ssoj.judge.application.selector.RunnerLanguageExecutorSelector;
 import com.example.ssoj.judge.application.sevice.RunnerExecutionService;
-import com.example.ssoj.judge.domain.model.JudgeContext;
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.LanguageExecutor;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
+import com.example.ssoj.judge.presentation.dto.RunnerTestCaseRequest;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(MockitoExtension.class)
 class RunnerExecutionServiceTest {
 
-    private static final Long SUBMISSION_10 = 10L;
-    private static final Long SUBMISSION_11 = 11L;
-
     @Test
-    void execute_usesMatchingLanguageExecutorAndMapsResponse() {
+    void executeSubmission_usesMatchingExecutorAndMapsRunResult() {
         RecordingLanguageExecutor executor = new RecordingLanguageExecutor(
                 "python",
-                new JudgeExecutionResult(true, "42\n", "", 0, 12, 256, false, false, false, false)
+                new JudgeRunResult(SubmissionResult.AC, 12, 256, null)
         );
         RunnerExecutionService service = new RunnerExecutionService(
-                new RunnerLanguageExecutorSelector(java.util.List.of(executor))
+                new RunnerLanguageExecutorSelector(List.of(executor))
         );
 
-        RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                SUBMISSION_10,
+        RunnerExecutionResponse response = service.executeSubmission(request("python"));
+
+        assertThat(response.result()).isEqualTo(SubmissionResult.AC);
+        assertThat(response.executionTimeMs()).isEqualTo(12);
+        assertThat(response.memoryUsageKb()).isEqualTo(256);
+        assertThat(response.failedTestcaseOrder()).isNull();
+        assertThat(executor.lastContext()).isEqualTo(new JudgeRunContext(
+                10L,
                 20L,
                 "python",
                 "print(42)",
-                "",
+                List.of(
+                        new HiddenTestCaseSnapshot(null, 1, "1 2\n", "3\n"),
+                        new HiddenTestCaseSnapshot(null, 2, "2 3\n", "5\n")
+                ),
                 1000,
                 128
         ));
-
-        assertThat(response.success()).isTrue();
-        assertThat(response.stdout()).isEqualTo("42\n");
-        assertThat(response.systemError()).isFalse();
-        assertThat(executor.lastContext()).isEqualTo(new JudgeContext(SUBMISSION_10, 20L, "python", "print(42)", "", 1000, 128));
     }
 
     @Test
-    void execute_returnsSystemErrorWhenLanguageIsUnsupported() {
+    void executeSubmission_returnsSystemErrorWhenLanguageIsUnsupported() {
         RunnerExecutionService service = new RunnerExecutionService(
-                new RunnerLanguageExecutorSelector(java.util.List.of())
+                new RunnerLanguageExecutorSelector(List.of())
         );
 
-        RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                SUBMISSION_10,
+        RunnerExecutionResponse response = service.executeSubmission(request("ruby"));
+
+        assertThat(response.result()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
+        assertThat(response.failedTestcaseOrder()).isNull();
+    }
+
+    @Test
+    void executeSubmission_returnsSystemErrorWhenExecutorThrows() {
+        RunnerExecutionService service = new RunnerExecutionService(
+                new RunnerLanguageExecutorSelector(List.of(new ThrowingLanguageExecutor("cpp")))
+        );
+
+        RunnerExecutionResponse response = service.executeSubmission(request("cpp"));
+
+        assertThat(response.result()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
+        assertThat(response.failedTestcaseOrder()).isNull();
+    }
+
+    private RunnerExecutionRequest request(String language) {
+        return new RunnerExecutionRequest(
+                10L,
                 20L,
-                "ruby",
-                "puts 1",
-                "",
+                language,
+                "print(42)",
+                List.of(
+                        new RunnerTestCaseRequest(1, "1 2\n", "3\n"),
+                        new RunnerTestCaseRequest(2, "2 3\n", "5\n")
+                ),
                 1000,
                 128
-        ));
-
-        assertThat(response.systemError()).isTrue();
-        assertThat(response.stderr()).contains("Unsupported language: ruby");
-    }
-
-    @Test
-    void execute_returnsSystemErrorWhenExecutorThrows() {
-        RunnerExecutionService service = new RunnerExecutionService(
-                new RunnerLanguageExecutorSelector(java.util.List.of(new ThrowingLanguageExecutor("cpp")))
         );
-
-        RunnerExecutionResponse response = service.execute(new RunnerExecutionRequest(
-                SUBMISSION_11,
-                21L,
-                "cpp",
-                "int main() {}",
-                "",
-                1000,
-                128
-        ));
-
-        assertThat(response.systemError()).isTrue();
-        assertThat(response.stderr()).contains("docker unavailable");
     }
 
     private static final class RecordingLanguageExecutor implements LanguageExecutor {
-
         private final String language;
-        private final JudgeExecutionResult result;
-        private JudgeContext lastContext;
+        private final JudgeRunResult result;
+        private JudgeRunContext lastContext;
 
-        private RecordingLanguageExecutor(String language, JudgeExecutionResult result) {
+        private RecordingLanguageExecutor(String language, JudgeRunResult result) {
             this.language = language;
             this.result = result;
         }
@@ -102,18 +106,17 @@ class RunnerExecutionServiceTest {
         }
 
         @Override
-        public JudgeExecutionResult execute(JudgeContext context) {
+        public JudgeRunResult executeSubmission(JudgeRunContext context) {
             this.lastContext = context;
             return result;
         }
 
-        private JudgeContext lastContext() {
+        private JudgeRunContext lastContext() {
             return lastContext;
         }
     }
 
     private static final class ThrowingLanguageExecutor implements LanguageExecutor {
-
         private final String language;
 
         private ThrowingLanguageExecutor(String language) {
@@ -126,7 +129,7 @@ class RunnerExecutionServiceTest {
         }
 
         @Override
-        public JudgeExecutionResult execute(JudgeContext context) {
+        public JudgeRunResult executeSubmission(JudgeRunContext context) {
             throw new IllegalStateException("docker unavailable");
         }
     }

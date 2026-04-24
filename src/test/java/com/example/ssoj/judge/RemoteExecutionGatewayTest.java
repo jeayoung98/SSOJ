@@ -1,17 +1,23 @@
 package com.example.ssoj.judge;
 
 import com.example.ssoj.judge.application.port.RemoteExecutionClient;
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.infrastructure.remote.RemoteExecutionGateway;
-import com.example.ssoj.judge.domain.model.JudgeContext;
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -21,95 +27,50 @@ class RemoteExecutionGatewayTest {
     private RemoteExecutionClient remoteExecutionClient;
 
     @Test
-    void execute_mapsRunnerResponseToJudgeExecutionResult() {
+    void executeSubmission_includesAllHiddenTestCasesAndMapsResponse() {
         RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
-        JudgeContext context = new JudgeContext(1L, 2L, "java", "class Main {}", "1 2", 1000, 128);
-
+        JudgeRunContext context = new JudgeRunContext(
+                1L,
+                2L,
+                "java",
+                "class Main {}",
+                List.of(
+                        new HiddenTestCaseSnapshot(11L, 1, "1 2", "3"),
+                        new HiddenTestCaseSnapshot(12L, 2, "2 3", "5")
+                ),
+                1000,
+                128
+        );
         when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
-                .thenReturn(new RunnerExecutionResponse(
-                        false,
-                        "",
-                        "compile error",
-                        1,
-                        42,
-                        256,
-                        false,
-                        false,
-                        true,
-                        false
-                ));
+                .thenReturn(new RunnerExecutionResponse(SubmissionResult.WA, 42, 256, 2));
 
-        JudgeExecutionResult result = gateway.execute(context);
+        JudgeRunResult result = gateway.executeSubmission(context);
 
-        assertThat(result.success()).isFalse();
-        assertThat(result.stderr()).isEqualTo("compile error");
-        assertThat(result.exitCode()).isEqualTo(1);
+        ArgumentCaptor<RunnerExecutionRequest> requestCaptor = ArgumentCaptor.forClass(RunnerExecutionRequest.class);
+        verify(remoteExecutionClient).execute(requestCaptor.capture());
+
+        assertThat(requestCaptor.getValue().testCases()).hasSize(2);
+        assertThat(requestCaptor.getValue().testCases())
+                .extracting(testCase -> testCase.input())
+                .containsExactly("1 2", "2 3");
+
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
         assertThat(result.executionTimeMs()).isEqualTo(42);
-        assertThat(result.memoryUsageKb()).isEqualTo(256);
-        assertThat(result.systemError()).isFalse();
-        assertThat(result.timedOut()).isFalse();
-        assertThat(result.compilationError()).isTrue();
-        assertThat(result.memoryLimitExceeded()).isFalse();
+        assertThat(result.memoryKb()).isEqualTo(256);
+        assertThat(result.failedTestcaseOrder()).isEqualTo(2);
     }
 
     @Test
-    void runnerExecutionResponse_from_preservesExecutionMetrics() {
-        RunnerExecutionResponse response = RunnerExecutionResponse.from(new JudgeExecutionResult(
-                false,
-                "",
-                "oom",
-                137,
-                1234,
-                54321,
-                false,
-                false,
-                false,
-                true
-        ));
-
-        assertThat(response.executionTimeMs()).isEqualTo(1234);
-        assertThat(response.memoryUsageKb()).isEqualTo(54321);
-        assertThat(response.memoryLimitExceeded()).isTrue();
-    }
-
-    @Test
-    void execute_mapsMemoryLimitExceededMetricFromRunnerResponse() {
+    void executeSubmission_returnsSystemErrorWhenRemoteClientFails() {
         RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
-        JudgeContext context = new JudgeContext(1L, 2L, "python", "print(1)", "", 1000, 128);
-
-        when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
-                .thenReturn(new RunnerExecutionResponse(
-                        false,
-                        "",
-                        "Killed",
-                        137,
-                        777,
-                        222222,
-                        false,
-                        false,
-                        false,
-                        true
-                ));
-
-        JudgeExecutionResult result = gateway.execute(context);
-
-        assertThat(result.executionTimeMs()).isEqualTo(777);
-        assertThat(result.memoryUsageKb()).isEqualTo(222222);
-        assertThat(result.memoryLimitExceeded()).isTrue();
-    }
-
-    @Test
-    void execute_returnsSystemErrorWhenRemoteClientFails() {
-        RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
-        JudgeContext context = new JudgeContext(1L, 2L, "python", "print(1)", "", 1000, 128);
+        JudgeRunContext context = new JudgeRunContext(1L, 2L, "python", "print(1)", List.of(), 1000, 128);
 
         when(remoteExecutionClient.execute(RunnerExecutionRequest.from(context)))
                 .thenThrow(new IllegalStateException("runner unavailable"));
 
-        JudgeExecutionResult result = gateway.execute(context);
+        JudgeRunResult result = gateway.executeSubmission(context);
 
-        assertThat(result.systemError()).isTrue();
-        assertThat(result.stderr()).contains("runner unavailable");
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
     }
 
     @Test

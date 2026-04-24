@@ -2,8 +2,8 @@ package com.example.ssoj.judge.infrastructure.remote;
 
 import com.example.ssoj.judge.application.port.ExecutionGateway;
 import com.example.ssoj.judge.application.port.RemoteExecutionClient;
-import com.example.ssoj.judge.domain.model.JudgeContext;
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,27 +38,21 @@ public class RemoteExecutionGateway implements ExecutionGateway {
     }
 
     @Override
-    public JudgeExecutionResult execute(JudgeContext context) {
+    public JudgeRunResult executeSubmission(JudgeRunContext context) {
         try {
             RunnerExecutionResponse response = remoteExecutionClient.execute(RunnerExecutionRequest.from(context));
             if (response == null) {
-                return JudgeExecutionResult.systemError("Remote runner returned no response");
+                return JudgeRunResult.systemError();
             }
 
-            return new JudgeExecutionResult(
-                    response.success(),
-                    response.stdout(),
-                    response.stderr(),
-                    response.exitCode(),
+            return new JudgeRunResult(
+                    response.result(),
                     response.executionTimeMs(),
                     response.memoryUsageKb(),
-                    response.systemError(),
-                    response.timedOut(),
-                    response.compilationError(),
-                    response.memoryLimitExceeded()
+                    response.failedTestcaseOrder()
             );
         } catch (Exception exception) {
-            return JudgeExecutionResult.systemError(exception.getMessage());
+            return JudgeRunResult.systemError();
         }
     }
 }

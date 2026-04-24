@@ -22,6 +22,6 @@ public class RunnerExecutionController {
 
     @PostMapping
     RunnerExecutionResponse execute(@RequestBody RunnerExecutionRequest request) {
-        return runnerExecutionService.execute(request);
+        return runnerExecutionService.executeSubmission(request);
     }
 }
