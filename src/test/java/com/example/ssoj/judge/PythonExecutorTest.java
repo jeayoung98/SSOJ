@@ -29,7 +29,7 @@ class PythonExecutorTest {
     void executeSubmission_runsAllTestCasesInSameWorkspace() {
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
                 List.of(
-                        new JudgeExecutionResult(true, "3\n", "", 0, 15, 128, false, false, false, false),
+                        new JudgeExecutionResult(true, "3\n", "", 0, 35, 512, false, false, false, false),
                         new JudgeExecutionResult(true, "5\n", "", 0, 18, 256, false, false, false, false)
                 )
         );
@@ -38,12 +38,32 @@ class PythonExecutorTest {
         JudgeRunResult result = pythonExecutor.executeSubmission(context());
 
         assertThat(result.finalResult()).isEqualTo(SubmissionResult.AC);
-        assertThat(result.executionTimeMs()).isEqualTo(18);
-        assertThat(result.memoryKb()).isEqualTo(256);
+        assertThat(result.executionTimeMs()).isEqualTo(35);
+        assertThat(result.memoryKb()).isEqualTo(512);
         assertThat(dockerProcessExecutor.runCallCount).isEqualTo(2);
         assertThat(dockerProcessExecutor.runCommand).isEqualTo("python3 main.py");
         assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(128);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
+    }
+
+    @Test
+    void executeSubmission_returnsMaxMetricsUntilFirstWrongAnswer() {
+        RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
+                List.of(
+                        new JudgeExecutionResult(true, "3\n", "", 0, 40, 700, false, false, false, false),
+                        new JudgeExecutionResult(true, "wrong\n", "", 0, 10, 100, false, false, false, false),
+                        new JudgeExecutionResult(true, "5\n", "", 0, 99, 900, false, false, false, false)
+                )
+        );
+        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+
+        JudgeRunResult result = pythonExecutor.executeSubmission(context());
+
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
+        assertThat(result.executionTimeMs()).isEqualTo(40);
+        assertThat(result.memoryKb()).isEqualTo(700);
+        assertThat(result.failedTestcaseOrder()).isEqualTo(2);
+        assertThat(dockerProcessExecutor.runCallCount).isEqualTo(2);
     }
 
     private JudgeRunContext context() {

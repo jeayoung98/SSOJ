@@ -123,17 +123,17 @@ public class   CppExecutor implements LanguageExecutor {
                     testCase.expectedOutput(),
                     context.memoryLimitMb()
             );
+            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
+            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
+
             if (caseResult != SubmissionResult.AC) {
                 return new JudgeRunResult(
                         caseResult,
-                        executionResult.executionTimeMs(),
-                        executionResult.memoryUsageKb(),
+                        maxExecutionTimeMs,
+                        maxMemoryKb,
                         JudgeExecutionPolicy.hasFailedTestcaseOrder(caseResult) ? testCase.testCaseOrder() : null
                 );
             }
-
-            maxExecutionTimeMs = max(maxExecutionTimeMs, executionResult.executionTimeMs());
-            maxMemoryKb = max(maxMemoryKb, executionResult.memoryUsageKb());
         }
 
         return new JudgeRunResult(SubmissionResult.AC, maxExecutionTimeMs, maxMemoryKb, null);
