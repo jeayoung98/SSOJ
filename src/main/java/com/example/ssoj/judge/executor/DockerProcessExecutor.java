@@ -425,7 +425,24 @@ public class DockerProcessExecutor {
                     : > "$target_file"
                     return
                   fi
-                  sed 's/\\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//' "$source_file" > "$target_file"
+                  awk '
+                    {
+                      sub(/\\r$/, "")
+                      sub(/[[:space:]]+$/, "")
+                      lines[++count] = $0
+                    }
+                    END {
+                      while (count > 0 && lines[count] == "") {
+                        count--
+                      }
+                      for (i = 1; i <= count; i++) {
+                        if (i > 1) {
+                          printf "\\n"
+                        }
+                        printf "%%s", lines[i]
+                      }
+                    }
+                  ' "$source_file" > "$target_file"
                 }
 
                 %s
@@ -537,13 +554,15 @@ public class DockerProcessExecutor {
 
         try {
             log.error(
-                    "Wrong answer details. submissionId={} fileIndex={} testcaseOrder={} input={} expected={} output={}",
+                    "Wrong answer details. submissionId={} fileIndex={} testcaseOrder={} input={} expected={} output={} normalizedExpected={} normalizedOutput={}",
                     submissionId,
                     fileIndex,
                     testcaseOrder,
                     abbreviate(readWorkspaceFile(workspaceDirectory.resolve("input_" + fileIndex + ".txt"))),
                     abbreviate(readWorkspaceFile(workspaceDirectory.resolve("expected_" + fileIndex + ".txt"))),
-                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt")))
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt"))),
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("expected_normalized.txt"))),
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("actual_normalized.txt")))
             );
         } catch (Exception exception) {
             log.error(
@@ -671,6 +690,32 @@ public class DockerProcessExecutor {
             return workspaceError;
         }
         return workspaceError + System.lineSeparator() + dockerError;
+    }
+
+    public String normalizeOutputForComparison(String output) {
+        if (output == null || output.isEmpty()) {
+            return "";
+        }
+
+        String normalizedNewlines = output.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = normalizedNewlines.split("\n", -1);
+        int endExclusive = lines.length;
+        while (endExclusive > 0 && rstrip(lines[endExclusive - 1]).isEmpty()) {
+            endExclusive--;
+        }
+
+        return Stream.of(lines)
+                .limit(endExclusive)
+                .map(this::rstrip)
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String rstrip(String value) {
+        int index = value.length();
+        while (index > 0 && Character.isWhitespace(value.charAt(index - 1))) {
+            index--;
+        }
+        return value.substring(0, index);
     }
 
     private boolean containsDockerOom(String stderr) {
