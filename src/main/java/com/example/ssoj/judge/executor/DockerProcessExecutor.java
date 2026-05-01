@@ -190,8 +190,10 @@ public class DockerProcessExecutor {
             logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
             return JudgeRunResult.systemError();
         }
-        if (batchResult.result() == SubmissionResult.WA) {
-            logWrongAnswerDetails(context.submissionId(), workspaceDirectory, batchResult);
+
+        JudgeRunResult outputComparisonResult = compareBatchOutputs(context, workspaceDirectory, batchResult);
+        if (outputComparisonResult != null) {
+            return outputComparisonResult;
         }
 
         return new JudgeRunResult(
@@ -418,33 +420,6 @@ public class DockerProcessExecutor {
                   parsed_mem="$(grep 'Maximum resident set size' "$usage_file" | sed 's/^.*:[[:space:]]*//')"
                 }
 
-                normalize_output() {
-                  source_file="$1"
-                  target_file="$2"
-                  if [ ! -f "$source_file" ]; then
-                    : > "$target_file"
-                    return
-                  fi
-                  awk '
-                    {
-                      sub(/\\r$/, "")
-                      sub(/[[:space:]]+$/, "")
-                      lines[++count] = $0
-                    }
-                    END {
-                      while (count > 0 && lines[count] == "") {
-                        count--
-                      }
-                      for (i = 1; i <= count; i++) {
-                        if (i > 1) {
-                          printf "\\n"
-                        }
-                        printf "%%s", lines[i]
-                      }
-                    }
-                  ' "$source_file" > "$target_file"
-                }
-
                 %s
                 i=1
                 while [ "$i" -le "$TEST_COUNT" ]; do
@@ -452,7 +427,7 @@ public class DockerProcessExecutor {
                   usage_file="usage_$i.txt"
                   output_file="output_$i.txt"
                   error_file="error_$i.txt"
-                  rm -f "$usage_file" "$output_file" "$error_file" actual_normalized.txt expected_normalized.txt
+                  rm -f "$usage_file" "$output_file" "$error_file"
 
                   /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s /usr/bin/bash -lc "$RUN_COMMAND" \\
                     < "input_$i.txt" > "$output_file" 2> "$error_file"
@@ -477,13 +452,6 @@ public class DockerProcessExecutor {
                   fi
                   if [ "$run_exit" -ne 0 ]; then
                     write_result RE "$order" "$max_time" "$max_mem" "$i"
-                    exit 0
-                  fi
-
-                  normalize_output "$output_file" actual_normalized.txt
-                  normalize_output "expected_$i.txt" expected_normalized.txt
-                  if ! cmp -s actual_normalized.txt expected_normalized.txt; then
-                    write_result WA "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
 
@@ -540,34 +508,117 @@ public class DockerProcessExecutor {
         }
     }
 
-    private void logWrongAnswerDetails(Long submissionId, Path workspaceDirectory, BatchResult batchResult) {
+    private JudgeRunResult compareBatchOutputs(
+            JudgeRunContext context,
+            Path workspaceDirectory,
+            BatchResult batchResult
+    ) throws IOException {
+        if (batchResult.result() != SubmissionResult.AC) {
+            return null;
+        }
+
+        Integer maxExecutionTimeMs = null;
+        Integer maxMemoryKb = null;
+        for (int index = 0; index < context.hiddenTestCases().size(); index++) {
+            int fileIndex = index + 1;
+            HiddenTestCaseSnapshot testCase = context.hiddenTestCases().get(index);
+            UsageMetrics usageMetrics = parseUsageMetrics(
+                    workspaceDirectory.resolve("usage_" + fileIndex + ".txt"),
+                    readWorkspaceFile(workspaceDirectory.resolve("error_" + fileIndex + ".txt")),
+                    0,
+                    context.timeLimitMs()
+            );
+            if (usageMetrics != null) {
+                maxExecutionTimeMs = max(maxExecutionTimeMs, usageMetrics.executionTimeMs());
+                maxMemoryKb = max(maxMemoryKb, usageMetrics.memoryUsageKb());
+            }
+
+            String expected = readWorkspaceFile(workspaceDirectory.resolve("expected_" + fileIndex + ".txt"));
+            String actual = readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt"));
+            String normalizedExpected = normalizeOutputForComparison(expected);
+            String normalizedActual = normalizeOutputForComparison(actual);
+            if (!normalizedExpected.equals(normalizedActual)) {
+                BatchResult wrongAnswer = new BatchResult(
+                        SubmissionResult.WA,
+                        maxExecutionTimeMs,
+                        maxMemoryKb,
+                        testCase.testCaseOrder(),
+                        fileIndex
+                );
+                logWrongAnswerDetails(context, workspaceDirectory, wrongAnswer);
+                return new JudgeRunResult(
+                        SubmissionResult.WA,
+                        maxExecutionTimeMs,
+                        maxMemoryKb,
+                        testCase.testCaseOrder()
+                );
+            }
+        }
+
+        return null;
+    }
+
+    JudgeRunResult compareCompletedBatchOutputs(
+            JudgeRunContext context,
+            Path workspaceDirectory,
+            JudgeRunResult completedRunResult
+    ) throws IOException {
+        return compareBatchOutputs(
+                context,
+                workspaceDirectory,
+                new BatchResult(
+                        completedRunResult.finalResult(),
+                        completedRunResult.executionTimeMs(),
+                        completedRunResult.memoryKb(),
+                        completedRunResult.failedTestcaseOrder(),
+                        null
+                )
+        );
+    }
+
+    private Integer max(Integer current, Integer candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null) {
+            return candidate;
+        }
+        return Math.max(current, candidate);
+    }
+
+    private void logWrongAnswerDetails(JudgeRunContext context, Path workspaceDirectory, BatchResult batchResult) {
         Integer fileIndex = batchResult.failedFileIndex();
         Integer testcaseOrder = batchResult.failedTestcaseOrder();
         if (fileIndex == null) {
             log.error(
-                    "Wrong answer occurred but failedFileIndex is missing. submissionId={} testcaseOrder={}",
-                    submissionId,
+                    "Wrong answer occurred but failedFileIndex is missing. submissionId={} language={} testcaseOrder={}",
+                    context.submissionId(),
+                    context.language(),
                     testcaseOrder
             );
             return;
         }
 
         try {
+            String expected = readWorkspaceFile(workspaceDirectory.resolve("expected_" + fileIndex + ".txt"));
+            String output = readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt"));
             log.error(
-                    "Wrong answer details. submissionId={} fileIndex={} testcaseOrder={} input={} expected={} output={} normalizedExpected={} normalizedOutput={}",
-                    submissionId,
+                    "Wrong answer details. submissionId={} language={} fileIndex={} testcaseOrder={} input={} expected={} output={} normalizedExpected={} normalizedOutput={}",
+                    context.submissionId(),
+                    context.language(),
                     fileIndex,
                     testcaseOrder,
                     abbreviate(readWorkspaceFile(workspaceDirectory.resolve("input_" + fileIndex + ".txt"))),
-                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("expected_" + fileIndex + ".txt"))),
-                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt"))),
-                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("expected_normalized.txt"))),
-                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("actual_normalized.txt")))
+                    abbreviate(expected),
+                    abbreviate(output),
+                    abbreviate(normalizeOutputForComparison(expected)),
+                    abbreviate(normalizeOutputForComparison(output))
             );
         } catch (Exception exception) {
             log.error(
-                    "Failed to log wrong answer details. submissionId={} fileIndex={} testcaseOrder={}",
-                    submissionId,
+                    "Failed to log wrong answer details. submissionId={} language={} fileIndex={} testcaseOrder={}",
+                    context.submissionId(),
+                    context.language(),
                     fileIndex,
                     testcaseOrder,
                     exception
