@@ -1,20 +1,20 @@
-# Judging Model
+# 채점 모델
 
-This document describes the current judging rules and result persistence model.
+이 문서는 현재 채점 규칙과 결과 저장 모델을 설명합니다.
 
-## Flow
+## 흐름
 
 ```text
-receive submissionId(Long)
+submissionId(Long) 수신
 -> startJudging
 -> status=JUDGING
--> load submission, problem limits, and hidden problem_testcases
--> execute by testcase_order
--> stop immediately on first WA/TLE/RE/MLE
--> save final result to submissions
+-> submission, problem limit, hidden problem_testcases 조회
+-> testcase_order 순서로 실행
+-> 첫 WA/TLE/RE/MLE 발생 시 즉시 중단
+-> submissions에 최종 결과 저장
 ```
 
-Relevant code:
+관련 코드:
 
 - `JudgeService.runJudgeLogic(...)`
 - `JudgePersistenceService.startJudging(...)`
@@ -23,28 +23,28 @@ Relevant code:
 - `RunnerExecutionService.executeSubmission(...)`
 - `LanguageExecutor.executeSubmission(...)`
 
-## First Failure Policy
+## 첫 실패 중단 정책
 
-Judging stops when a testcase result is not `AC`.
+채점은 testcase 결과가 `AC`가 아닌 순간 중단합니다.
 
-`failedTestcaseOrder` is saved for:
+`failedTestcaseOrder`를 저장하는 결과:
 
 - `WA`
 - `TLE`
 - `RE`
 - `MLE`
 
-`failedTestcaseOrder` is `null` for:
+`failedTestcaseOrder`가 `null`인 결과:
 
 - `AC`
 - `CE`
 - `SYSTEM_ERROR`
 
-`CE` is treated as compile failure and is not exposed as a testcase failure number. `SYSTEM_ERROR` is not assumed to be caused by a specific testcase.
+`CE`는 컴파일 실패로 처리하므로 특정 testcase 실패 번호로 노출하지 않습니다. `SYSTEM_ERROR`도 특정 testcase 때문에 발생했다고 단정하지 않습니다.
 
-## Batch Execution Policy
+## Batch 실행 정책
 
-The current runner contract sends multiple hidden testcases in a single request:
+현재 runner 계약은 여러 hidden testcase를 하나의 요청으로 전달합니다.
 
 ```json
 {
@@ -64,7 +64,7 @@ The current runner contract sends multiple hidden testcases in a single request:
 }
 ```
 
-The runner returns one final result for the submission execution batch:
+runner는 제출 실행 batch에 대한 최종 결과 하나를 반환합니다.
 
 ```json
 {
@@ -75,41 +75,41 @@ The runner returns one final result for the submission execution batch:
 }
 ```
 
-This avoids creating a separate Docker container for every testcase and preserves early termination on first failure.
+이 방식은 testcase마다 별도 Docker 컨테이너를 생성하지 않도록 하며, 첫 실패 즉시 중단 정책도 유지합니다.
 
-## Submission Result Storage
+## 제출 결과 저장
 
-Only `submissions` stores judge results:
+채점 결과는 `submissions`에만 저장합니다.
 
-| Field | Meaning |
+| Field | 의미 |
 | --- | --- |
-| `status` | Work state. Finished submissions use `DONE` |
-| `result` | Final judge result |
-| `failed_testcase_order` | First failed testcase order for WA/TLE/RE/MLE |
-| `execution_time_ms` | Max execution time among executed testcases |
-| `memory_kb` | Max memory usage among executed testcases |
-| `submitted_at` | Submission creation time |
-| `judged_at` | Judge completion time |
+| `status` | 작업 상태. 완료된 제출은 `DONE` |
+| `result` | 최종 채점 결과 |
+| `failed_testcase_order` | WA/TLE/RE/MLE의 첫 실패 testcase order |
+| `execution_time_ms` | 실행된 testcase 중 최대 실행 시간 |
+| `memory_kb` | 실행된 testcase 중 최대 메모리 사용량 |
+| `submitted_at` | 제출 생성 시간 |
+| `judged_at` | 채점 완료 시간 |
 
-There is no active testcase-level result entity or repository.
+현재 활성화된 testcase-level result entity 또는 repository는 없습니다.
 
-## Time And Memory Basis
+## 시간과 메모리 기준
 
-Submission-level `executionTimeMs` and `memoryKb` use the maximum value among executed testcases.
+제출 단위 `executionTimeMs`, `memoryKb`는 실행된 testcase 중 최댓값을 사용합니다.
 
-Reason:
+이유:
 
-- Online judges usually compare each testcase against the same limits.
-- The maximum value best represents whether the submission approached a limit.
-- Last-run or summed values are less useful for limit-oriented judging.
+- 온라인 저지는 보통 각 testcase를 동일한 제한 기준으로 판정합니다.
+- 최댓값은 제출이 제한에 얼마나 근접했는지 가장 잘 보여줍니다.
+- 마지막 실행값이나 합산값은 제한 판정 관점에서 덜 유용합니다.
 
-Local Docker execution may return `null` for real memory usage depending on runtime/image support. Remote runner memory is saved when `memoryUsageKb` is provided.
+로컬 Docker 실행은 runtime/image 지원 여부에 따라 실제 memory usage를 `null`로 반환할 수 있습니다. remote runner가 `memoryUsageKb`를 제공하면 해당 값을 저장합니다.
 
-## Submission Response
+## 제출 응답
 
-The current response DTO is `SubmissionResponse`.
+현재 응답 DTO는 `SubmissionResponse`입니다.
 
-It exposes:
+노출 필드:
 
 - `id`
 - `userId`
@@ -123,4 +123,4 @@ It exposes:
 - `submittedAt`
 - `judgedAt`
 
-Future controllers can build user-facing result screens from `SubmissionResponse.from(submission)` without loading testcase result rows.
+향후 controller는 testcase result row를 조회하지 않고도 `SubmissionResponse.from(submission)`으로 사용자용 결과 화면을 구성할 수 있습니다.

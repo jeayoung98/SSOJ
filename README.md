@@ -1,41 +1,41 @@
 # SSOJ
 
-SSOJ is a Spring Boot based online judge worker/orchestrator repository.
+SSOJ는 Spring Boot 기반 온라인 저지 worker/orchestrator 저장소입니다.
 
-This repository contains the judging backend only. The Next.js Web/API layer is treated as an external integration that creates submissions and requests judging.
+이 저장소는 채점 백엔드만 포함합니다. Next.js Web/API 계층은 이 저장소 외부의 통합 대상이며, 제출 정보를 생성한 뒤 채점을 요청하는 역할로 가정합니다.
 
-## Current Scope
+## 현재 범위
 
-- Spring Boot orchestrator: loads submissions/testcases from PostgreSQL and saves final judge results.
-- Spring Boot runner: executes submitted code through Docker and returns a batch judge result.
-- PostgreSQL: stores problems, examples, hidden testcases, submissions, and final judge results.
-- Redis: local async dispatch path.
-- Cloud Tasks: deployment async dispatch path.
-- Docker: isolated execution for C++, Java, and Python.
+- Spring Boot orchestrator: PostgreSQL에서 제출과 테스트케이스를 조회하고 최종 채점 결과를 저장합니다.
+- Spring Boot runner: Docker를 통해 제출 코드를 실행하고 batch 채점 결과를 반환합니다.
+- PostgreSQL: 문제, 예제, hidden testcase, 제출, 최종 채점 결과를 저장합니다.
+- Redis: 로컬 비동기 dispatch 경로로 사용합니다.
+- Cloud Tasks: 배포 환경의 비동기 dispatch 경로로 사용합니다.
+- Docker: C++, Java, Python 코드를 격리 실행합니다.
 
-Out of scope for this repository:
+이 저장소의 범위가 아닌 것:
 
-- Next.js Web/API implementation
-- ranking
-- plagiarism detection
+- Next.js Web/API 구현
+- 랭킹
+- 표절 검사
 - special judge
-- advanced sandbox hardening
+- 고도화된 sandbox hardening
 - realtime/SSE push
 
-## Architecture Summary
+## 아키텍처 요약
 
 ```text
 Web/API
--> create submissions row
--> dispatch submissionId
+-> submissions row 생성
+-> submissionId dispatch
 -> orchestrator
--> load submission + hidden testcases
--> runner or local Docker executor
--> stop at first failed testcase
--> save final result to submissions
+-> submission + hidden testcases 조회
+-> runner 또는 local Docker executor 실행
+-> 첫 실패 테스트케이스에서 즉시 중단
+-> submissions에 최종 결과 저장
 ```
 
-Deployment-oriented split:
+배포 기준 분리 구조:
 
 ```text
 Cloud Tasks
@@ -45,17 +45,17 @@ Cloud Tasks
 -> PostgreSQL result update
 ```
 
-The runner is execution-only. It does not use PostgreSQL, Redis, or Cloud Tasks directly.
+runner는 실행 전용 컴포넌트입니다. PostgreSQL, Redis, Cloud Tasks를 직접 사용하지 않습니다.
 
-## Judging Model
+## 채점 모델
 
-- Hidden testcases are executed by `testcase_order`.
-- The runner executes testcases in batch, not one container per testcase.
-- Judging stops immediately on the first `WA`, `TLE`, `RE`, or `MLE`.
-- Submission-level `execution_time_ms` and `memory_kb` store the maximum value among executed testcases.
-- Testcase-level result rows are not persisted.
+- hidden testcase는 `testcase_order` 순서로 실행합니다.
+- runner는 테스트케이스마다 컨테이너를 새로 만들지 않고 batch로 실행합니다.
+- 첫 `WA`, `TLE`, `RE`, `MLE` 발생 시 즉시 채점을 중단합니다.
+- 제출 단위의 `execution_time_ms`, `memory_kb`에는 실행된 테스트케이스 중 최댓값을 저장합니다.
+- 테스트케이스별 결과 row는 저장하지 않습니다.
 
-Final result fields are stored in `submissions`:
+최종 결과는 `submissions`에 저장합니다.
 
 - `status`
 - `result`
@@ -65,11 +65,11 @@ Final result fields are stored in `submissions`:
 - `submitted_at`
 - `judged_at`
 
-`failed_testcase_order` is `null` for `AC`, `CE`, and `SYSTEM_ERROR`.
+`failed_testcase_order`는 `AC`, `CE`, `SYSTEM_ERROR`인 경우 `null`입니다.
 
-## DB Baseline
+## DB 기준
 
-Active JPA tables:
+현재 JPA 기준 활성 테이블:
 
 - `users`
 - `problems`
@@ -77,7 +77,7 @@ Active JPA tables:
 - `problem_testcases`
 - `submissions`
 
-ID policy:
+ID 정책:
 
 | Entity | ID type |
 | --- | --- |
@@ -87,11 +87,11 @@ ID policy:
 | `problem_testcases.id` | `Long` |
 | `submissions.id` | `Long` |
 
-This repository does not currently include DDL or migration files. Existing external DB schemas must be kept aligned separately.
+이 저장소는 현재 DDL 또는 migration 파일을 포함하지 않습니다. 외부 DB 스키마는 별도로 현재 JPA 모델과 맞춰야 합니다.
 
-## Run Locally
+## 로컬 실행
 
-Requirements:
+필수 조건:
 
 - JDK 17
 - PostgreSQL
@@ -102,21 +102,21 @@ Requirements:
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
-Redis enqueue example:
+Redis enqueue 예시:
 
 ```powershell
 redis-cli LPUSH judge:queue 1
 ```
 
-The Redis payload is a plain `submissionId` Long string.
+Redis payload는 단순한 `submissionId` Long 문자열입니다.
 
-## Run Tests
+## 테스트 실행
 
 ```powershell
 .\gradlew.bat test
 ```
 
-## Main Docs
+## 주요 문서
 
 - [Architecture](docs/architecture.md)
 - [Local Development](docs/local-development.md)
@@ -124,4 +124,4 @@ The Redis payload is a plain `submissionId` Long string.
 - [Judging Model](docs/judging-model.md)
 - [Validation Checklist](docs/validation-checklist.md)
 
-Older documents under `docs/archive/` are historical references only. Prefer the main docs above when they conflict.
+`docs/archive/` 아래의 오래된 문서는 과거 기록용입니다. 내용이 충돌하면 위 주요 문서를 기준으로 봅니다.
