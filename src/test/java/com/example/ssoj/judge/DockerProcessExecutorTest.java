@@ -22,7 +22,7 @@ class DockerProcessExecutorTest {
 
     @Test
     void executeRun_completesLongRunningCommandWithinTimeLimit() throws Exception {
-        // 시간이 꽤 걸리는 명령이라도 제한 시간 안에 끝나면 정상 성공이어야 한다.
+        // ?쒓컙??苑?嫄몃━??紐낅졊?대씪???쒗븳 ?쒓컙 ?덉뿉 ?앸굹硫??뺤긽 ?깃났?댁뼱???쒕떎.
         DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
         Path workspaceDirectory = Files.createTempDirectory("docker-process-test-");
 
@@ -40,7 +40,7 @@ class DockerProcessExecutorTest {
             JudgeExecutionResult result = dockerProcessExecutor.executeRun(
                     context,
                     workspaceDirectory,
-                    "gcc:13",
+                    "ssoj-cpp-runner:13",
                     128,
                     "sleep 1 && printf done"
             );
@@ -89,7 +89,7 @@ class DockerProcessExecutorTest {
             JudgeExecutionResult result = dockerProcessExecutor.executeRun(
                     context,
                     workspaceDirectory,
-                    "python:3.11",
+                    "ssoj-python-runner:3.11",
                     128,
                     "python3 -c 'a,b=map(int,input().split()); print(a+b)'"
             );
@@ -133,7 +133,7 @@ class DockerProcessExecutorTest {
             JudgeExecutionResult result = dockerProcessExecutor.executeRun(
                     context,
                     workspaceDirectory,
-                    "python:3.11",
+                    "ssoj-python-runner:3.11",
                     128,
                     "python3 -c \"import time; time.sleep(2)\""
             );
@@ -185,7 +185,7 @@ class DockerProcessExecutorTest {
                             128
                     ),
                     workspaceDirectory,
-                    "python:3.11",
+                    "ssoj-python-runner:3.11",
                     128,
                     null,
                     null,
@@ -225,7 +225,7 @@ class DockerProcessExecutorTest {
                             128
                     ),
                     workspaceDirectory,
-                    "eclipse-temurin:17-jdk",
+                    "ssoj-java-runner:17",
                     256,
                     "javac Main.java",
                     15000L,
@@ -236,6 +236,56 @@ class DockerProcessExecutorTest {
             assertThat(result.failedTestcaseOrder()).isNull();
             assertThat(result.executionTimeMs()).isNull();
             assertThat(result.memoryKb()).isNull();
+        } finally {
+            deleteDirectory(workspaceDirectory);
+        }
+    }
+
+    @Test
+    void executeBatch_runsCppTestCasesInSingleContainerAndReturnsAc() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-batch-cpp-ac-test-");
+
+        try {
+            Files.writeString(
+                    workspaceDirectory.resolve("main.cpp"),
+                    """
+                            #include <iostream>
+                            int main() {
+                                int a, b;
+                                std::cin >> a >> b;
+                                std::cout << a + b << '\\n';
+                                return 0;
+                            }
+                            """,
+                    StandardCharsets.UTF_8
+            );
+
+            JudgeRunResult result = dockerProcessExecutor.executeBatch(
+                    new JudgeRunContext(
+                            105L,
+                            205L,
+                            "cpp",
+                            "",
+                            List.of(
+                                    new HiddenTestCaseSnapshot(1L, 1, "1 2\n", "3\n"),
+                                    new HiddenTestCaseSnapshot(2L, 2, "10 20\n", "30\n")
+                            ),
+                            3000,
+                            128
+                    ),
+                    workspaceDirectory,
+                    "ssoj-cpp-runner:13",
+                    128,
+                    "g++ main.cpp -O2 -std=c++17 -o main",
+                    15000L,
+                    "./main"
+            );
+
+            assertThat(result.finalResult()).isEqualTo(SubmissionResult.AC);
+            assertThat(result.failedTestcaseOrder()).isNull();
+            assertThat(result.executionTimeMs()).isNotNull();
+            assertThat(result.memoryKb()).isNotNull();
         } finally {
             deleteDirectory(workspaceDirectory);
         }
@@ -257,3 +307,5 @@ class DockerProcessExecutorTest {
         }
     }
 }
+
+

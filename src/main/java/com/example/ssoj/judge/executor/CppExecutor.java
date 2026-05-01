@@ -26,7 +26,7 @@ public class CppExecutor implements LanguageExecutor {
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public CppExecutor(
-            @Value("${worker.executor.cpp.image:gcc:13}") String dockerImage,
+            @Value("${worker.executor.cpp.image:ssoj-cpp-runner:13}") String dockerImage,
             @Value("${worker.executor.compile-timeout-ms:15000}") long compileTimeoutMs,
             @Value("${worker.executor.cpp.compile-command:g++ main.cpp -O2 -std=c++17 -o main}") String compileCommand,
             @Value("${worker.executor.cpp.run-command:./main}") String runCommand,

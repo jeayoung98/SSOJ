@@ -30,7 +30,7 @@ class PythonExecutorTest {
                         new JudgeRunResult(SubmissionResult.AC, 35, 512, null)
                 )
         );
-        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+        PythonExecutor pythonExecutor = new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeRunResult result = pythonExecutor.executeSubmission(context());
 
@@ -38,6 +38,7 @@ class PythonExecutorTest {
         assertThat(result.executionTimeMs()).isEqualTo(35);
         assertThat(result.memoryKb()).isEqualTo(512);
         assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
+        assertThat(dockerProcessExecutor.dockerImage).isEqualTo("ssoj-python-runner:3.11");
         assertThat(dockerProcessExecutor.runCommand).isEqualTo("python3 main.py");
         assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(128);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
@@ -50,7 +51,7 @@ class PythonExecutorTest {
                         new JudgeRunResult(SubmissionResult.WA, 40, 700, 2)
                 )
         );
-        PythonExecutor pythonExecutor = new PythonExecutor("python:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+        PythonExecutor pythonExecutor = new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
 
         JudgeRunResult result = pythonExecutor.executeSubmission(context());
 
@@ -79,6 +80,7 @@ class PythonExecutorTest {
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
         private final Queue<JudgeRunResult> runResults;
         private Path workspaceDirectory;
+        private String dockerImage;
         private String runCommand;
         private int dockerMemoryMb;
         private int batchCallCount;
@@ -98,6 +100,7 @@ class PythonExecutorTest {
                 String runCommand
         ) {
             this.workspaceDirectory = workspaceDirectory;
+            this.dockerImage = dockerImage;
             this.runCommand = runCommand;
             this.dockerMemoryMb = dockerMemoryMb;
             this.batchCallCount++;

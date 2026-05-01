@@ -31,7 +31,7 @@ class JavaExecutorTest {
                 )
         );
         JavaExecutor javaExecutor = new JavaExecutor(
-                "eclipse-temurin:17-jdk",
+                "ssoj-java-runner:17",
                 15000L,
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
@@ -43,6 +43,7 @@ class JavaExecutorTest {
         assertThat(result.executionTimeMs()).isEqualTo(35);
         assertThat(result.memoryKb()).isEqualTo(512);
         assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
+        assertThat(dockerProcessExecutor.dockerImage).isEqualTo("ssoj-java-runner:17");
         assertThat(dockerProcessExecutor.compileCommand).isEqualTo("javac Main.java");
         assertThat(dockerProcessExecutor.runCommand).isEqualTo("java -Xmx128m Main");
         assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(256);
@@ -57,7 +58,7 @@ class JavaExecutorTest {
                 )
         );
         JavaExecutor javaExecutor = new JavaExecutor(
-                "eclipse-temurin:17-jdk",
+                "ssoj-java-runner:17",
                 15000L,
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
@@ -78,7 +79,7 @@ class JavaExecutorTest {
                 List.of(new JudgeRunResult(SubmissionResult.CE, null, null, null))
         );
         JavaExecutor javaExecutor = new JavaExecutor(
-                "eclipse-temurin:17-jdk",
+                "ssoj-java-runner:17",
                 15000L,
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
@@ -111,6 +112,7 @@ class JavaExecutorTest {
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
         private final Queue<JudgeRunResult> runResults;
         private Path workspaceDirectory;
+        private String dockerImage;
         private int dockerMemoryMb;
         private String compileCommand;
         private String runCommand;
@@ -131,6 +133,7 @@ class JavaExecutorTest {
                 String runCommand
         ) {
             this.workspaceDirectory = workspaceDirectory;
+            this.dockerImage = dockerImage;
             this.dockerMemoryMb = dockerMemoryMb;
             this.compileCommand = compileCommand;
             this.runCommand = runCommand;
@@ -139,3 +142,5 @@ class JavaExecutorTest {
         }
     }
 }
+
+

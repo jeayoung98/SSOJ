@@ -16,8 +16,11 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.TimeUnit;
@@ -155,21 +158,36 @@ public class DockerProcessExecutor {
                 workspaceDirectory,
                 dockerImage,
                 dockerMemoryMb,
-                "sh /workspace/run_all.sh",
+                "/usr/bin/bash /workspace/run_all.sh",
                 waitTimeoutMs,
                 null
         );
 
         if (result.systemError()) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            return JudgeRunResult.systemError();
+        }
+
+        if (result.exitCode() == null || result.exitCode() != 0) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
             return JudgeRunResult.systemError();
         }
 
         if (!Files.exists(resultFile)) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
             return JudgeRunResult.systemError();
         }
 
-        BatchResult batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
+        BatchResult batchResult;
+        try {
+            batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
+        } catch (Exception exception) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            log.error("Failed to parse batch result.json for submission {}", context.submissionId(), exception);
+            return JudgeRunResult.systemError();
+        }
         if (batchResult.result() == null) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
             return JudgeRunResult.systemError();
         }
 
@@ -315,7 +333,7 @@ public class DockerProcessExecutor {
         String compileBlock = "";
         if (compileCommand != null && !compileCommand.isBlank()) {
             compileBlock = """
-                    timeout "$COMPILE_TIMEOUT_SECONDS"s sh -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
+                    timeout "$COMPILE_TIMEOUT_SECONDS"s /usr/bin/bash -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
                     compile_exit=$?
                     if [ "$compile_exit" -ne 0 ]; then
                       write_result CE "" "" ""
@@ -326,7 +344,7 @@ public class DockerProcessExecutor {
         }
 
         return """
-                #!/bin/sh
+                #!/usr/bin/env bash
                 set +e
 
                 TEST_COUNT=%d
@@ -414,7 +432,7 @@ public class DockerProcessExecutor {
                   error_file="error_$i.txt"
                   rm -f "$usage_file" "$output_file" "$error_file" actual_normalized.txt expected_normalized.txt
 
-                  /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s sh -lc "$RUN_COMMAND" \\
+                  /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s /usr/bin/bash -lc "$RUN_COMMAND" \\
                     < "input_$i.txt" > "$output_file" 2> "$error_file"
                   run_exit=$?
                   parse_usage "$usage_file"
@@ -472,6 +490,83 @@ public class DockerProcessExecutor {
 
     private String shellSingleQuote(String value) {
         return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private void logBatchFailureDiagnostics(Long submissionId, Path workspaceDirectory, CommandResult result) {
+        try {
+            log.error(
+                    "Batch Docker execution failed. submissionId={} exitCode={} systemError={} dockerStdout={} dockerStderr={}",
+                    submissionId,
+                    result.exitCode(),
+                    result.systemError(),
+                    abbreviate(result.stdout()),
+                    abbreviate(result.stderr())
+            );
+            log.error("Batch run_all.sh. submissionId={} content={}", submissionId, readWorkspaceFile(workspaceDirectory.resolve("run_all.sh")));
+            log.error("Batch workspace files. submissionId={} files={}", submissionId, listWorkspaceFiles(workspaceDirectory));
+
+            Path resultFile = workspaceDirectory.resolve("result.json");
+            log.error(
+                    "Batch result.json. submissionId={} exists={} content={}",
+                    submissionId,
+                    Files.exists(resultFile),
+                    Files.exists(resultFile) ? readWorkspaceFile(resultFile) : ""
+            );
+            logBatchErrorFiles(submissionId, workspaceDirectory);
+        } catch (Exception exception) {
+            log.error("Failed to log batch diagnostics for submission {}", submissionId, exception);
+        }
+    }
+
+    private List<String> listWorkspaceFiles(Path workspaceDirectory) throws IOException {
+        if (!Files.exists(workspaceDirectory)) {
+            return List.of();
+        }
+
+        try (Stream<Path> paths = Files.list(workspaceDirectory)) {
+            return paths
+                    .map(path -> path.getFileName().toString())
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    private void logBatchErrorFiles(Long submissionId, Path workspaceDirectory) throws IOException {
+        if (!Files.exists(workspaceDirectory)) {
+            return;
+        }
+
+        try (Stream<Path> paths = Files.list(workspaceDirectory)) {
+            List<Path> errorFiles = paths
+                    .filter(path -> {
+                        String fileName = path.getFileName().toString();
+                        return fileName.equals("error.txt")
+                                || fileName.equals("compile_stderr.txt")
+                                || (fileName.startsWith("error_") && fileName.endsWith(".txt"));
+                    })
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .collect(Collectors.toList());
+
+            for (Path errorFile : errorFiles) {
+                log.error(
+                        "Batch stderr file. submissionId={} file={} content={}",
+                        submissionId,
+                        errorFile.getFileName(),
+                        abbreviate(readWorkspaceFile(errorFile))
+                );
+            }
+        }
+    }
+
+    private String abbreviate(String value) {
+        if (value == null) {
+            return "";
+        }
+        int maxLength = 20000;
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "...[truncated]";
     }
 
     private String toTimeoutSeconds(Integer timeLimitMs) {

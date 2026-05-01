@@ -26,7 +26,7 @@ public class JavaExecutor implements LanguageExecutor {
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public JavaExecutor(
-            @Value("${worker.executor.java.image:eclipse-temurin:17-jdk}") String dockerImage,
+            @Value("${worker.executor.java.image:ssoj-java-runner:17}") String dockerImage,
             @Value("${worker.executor.compile-timeout-ms:15000}") long compileTimeoutMs,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory

@@ -1,7 +1,6 @@
 package com.example.ssoj.judge;
 
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
-import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.CppExecutor;
@@ -33,7 +32,7 @@ class CppExecutorTest {
                 )
         );
         CppExecutor cppExecutor = new CppExecutor(
-                "gcc:13",
+                "ssoj-cpp-runner:13",
                 15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
@@ -47,6 +46,7 @@ class CppExecutorTest {
         assertThat(result.executionTimeMs()).isEqualTo(35);
         assertThat(result.memoryKb()).isEqualTo(512);
         assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
+        assertThat(dockerProcessExecutor.dockerImage).isEqualTo("ssoj-cpp-runner:13");
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
@@ -58,7 +58,7 @@ class CppExecutorTest {
                 )
         );
         CppExecutor cppExecutor = new CppExecutor(
-                "gcc:13",
+                "ssoj-cpp-runner:13",
                 15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
@@ -81,7 +81,7 @@ class CppExecutorTest {
                 List.of(new JudgeRunResult(SubmissionResult.TLE, 1000, 200, 2))
         );
         CppExecutor cppExecutor = new CppExecutor(
-                "gcc:13",
+                "ssoj-cpp-runner:13",
                 15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
@@ -102,7 +102,7 @@ class CppExecutorTest {
     void executeSubmission_deletesTempDirectoryWhenDockerExecutionThrows() {
         ThrowingDockerProcessExecutor dockerProcessExecutor = new ThrowingDockerProcessExecutor();
         CppExecutor cppExecutor = new CppExecutor(
-                "gcc:13",
+                "ssoj-cpp-runner:13",
                 15000L,
                 "g++ main.cpp -O2 -std=c++17 -o main",
                 "./main",
@@ -134,6 +134,7 @@ class CppExecutorTest {
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
         private final Queue<JudgeRunResult> runResults;
         private Path workspaceDirectory;
+        private String dockerImage;
         private int batchCallCount;
 
         RecordingDockerProcessExecutor(List<JudgeRunResult> runResults) {
@@ -151,6 +152,7 @@ class CppExecutorTest {
                 String runCommand
         ) {
             this.workspaceDirectory = workspaceDirectory;
+            this.dockerImage = dockerImage;
             this.batchCallCount++;
             return runResults.remove();
         }
@@ -174,3 +176,5 @@ class CppExecutorTest {
         }
     }
 }
+
+

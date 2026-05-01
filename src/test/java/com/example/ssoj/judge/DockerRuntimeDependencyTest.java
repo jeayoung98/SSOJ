@@ -14,14 +14,14 @@ class DockerRuntimeDependencyTest {
 
     @Test
     void runnerImages_provideUsrBinTimeVerbose() throws Exception {
-        assertImageSupportsTimeVerbose("eclipse-temurin:17-jdk");
-        assertImageSupportsTimeVerbose("python:3.11");
-        assertImageSupportsTimeVerbose("gcc:13");
+        assertImageSupportsTimeVerbose("ssoj-java-runner:17");
+        assertImageSupportsTimeVerbose("ssoj-python-runner:3.11");
+        assertImageSupportsTimeVerbose("ssoj-cpp-runner:13");
     }
 
     private static void assertImageSupportsTimeVerbose(String image) throws Exception {
         Process process = new ProcessBuilder(
-                List.of("docker", "run", "--rm", image, "sh", "-lc", "/usr/bin/time -v echo hi")
+                List.of("docker", "run", "--rm", image, "/usr/bin/bash", "-lc", "/usr/bin/time -v echo hi")
         ).start();
 
         boolean finished = process.waitFor(30, TimeUnit.SECONDS);

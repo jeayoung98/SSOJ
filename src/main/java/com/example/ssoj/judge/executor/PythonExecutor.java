@@ -24,7 +24,7 @@ public class PythonExecutor implements LanguageExecutor {
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public PythonExecutor(
-            @Value("${worker.executor.python.image:python:3.11}") String dockerImage,
+            @Value("${worker.executor.python.image:ssoj-python-runner:3.11}") String dockerImage,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
