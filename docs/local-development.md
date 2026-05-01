@@ -20,6 +20,7 @@ submissionId(Long)
 -> JudgeQueueConsumer
 -> JudgeService
 -> DockerExecutionGateway
+-> LanguageExecutor
 -> submissions update
 ```
 
@@ -32,7 +33,7 @@ submissionId(Long)
 
 Without Docker daemon, the local Docker execution path cannot run submissions.
 
-## Run
+## Run Local Orchestrator
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
@@ -41,12 +42,14 @@ Without Docker daemon, the local Docker execution path cannot run submissions.
 Redis enqueue:
 
 ```powershell
-redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
+redis-cli LPUSH judge:queue 1
 ```
 
-The queue payload is a plain Long string, not JSON.
+The queue payload is a plain Long string, not JSON and not UUID.
 
 ## Local Orchestrator/Runner Split
+
+Use this when validating the same boundary as deployment.
 
 Runner:
 
@@ -60,13 +63,34 @@ Orchestrator:
 .\gradlew.bat bootRun --args="--spring.profiles.active=remote --server.port=8080 --judge.execution.remote.base-url=http://localhost:8081"
 ```
 
-Trigger:
+Trigger orchestrator:
 
 ```powershell
 curl -X POST http://localhost:8080/internal/judge-executions ^
   -H "Content-Type: application/json" ^
-  -d "{\"submissionId\":\"00000000-0000-0000-0000-000000000001\"}"
+  -d "{\"submissionId\":1}"
 ```
+
+Direct runner smoke test:
+
+```powershell
+curl -X POST http://localhost:8081/internal/runner-executions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"submissionId\":1,\"problemId\":1,\"language\":\"python\",\"sourceCode\":\"a,b=map(int,input().split())\nprint(a+b)\",\"testCases\":[{\"testCaseOrder\":1,\"input\":\"1 2\n\",\"expectedOutput\":\"3\n\"}],\"timeLimitMs\":3000,\"memoryLimitMb\":128}"
+```
+
+Expected runner response example:
+
+```json
+{
+  "result": "AC",
+  "executionTimeMs": 10,
+  "memoryUsageKb": 128,
+  "failedTestcaseOrder": null
+}
+```
+
+Actual time and memory values depend on the Docker runtime environment.
 
 ## Tests
 
@@ -81,11 +105,16 @@ The tests cover:
 - `failedTestcaseOrder` storage
 - max execution time and memory storage
 - AC/CE/SYSTEM_ERROR failed order handling
+- runner profile isolation from DB/JPA/Redis
+- remote runner request/response mapping
+- Cloud Tasks dispatch payload creation
 
 ## Useful DB Check
 
 ```sql
 select id,
+       problem_id,
+       language,
        status,
        result,
        failed_testcase_order,
@@ -102,7 +131,6 @@ No testcase-level result table is required for user-facing result lookup.
 ## Notes
 
 - This repository does not add DDL/migration files.
-- If an existing DB still has `submission_testcase_results`, dropping it is a
-  later code-external DB cleanup task.
-- Docker executor may return `null` for real memory usage.
+- If an existing DB still has `submission_testcase_results`, dropping it is a later code-external DB cleanup task.
+- Docker executor may return `null` for real memory usage depending on environment and image support.
 - SSE is not part of the local worker flow.

@@ -1,31 +1,61 @@
 # SSOJ
 
-SSOJ is a Spring Boot based online judge worker repository for the MVP phase.
-The current repository contains the worker/orchestrator/runner code, not the
-Next.js Web/API code.
+SSOJ is a Spring Boot based online judge worker/orchestrator repository.
 
-## Current Implementation
+This repository contains the judging backend only. The Next.js Web/API layer is treated as an external integration that creates submissions and requests judging.
 
-- Web/API is expected to create a `submissions` row first, then pass the
-  `submissionId` through Redis or Cloud Tasks.
-- Spring Boot can run as an orchestrator or runner depending on profile/property.
-- Local validation uses Redis polling and Docker execution.
-- Deployment mode uses an HTTP-triggered orchestrator and a remote runner.
-- SSE/realtime push is out of scope.
+## Current Scope
 
-## Judging Flow
+- Spring Boot orchestrator: loads submissions/testcases from PostgreSQL and saves final judge results.
+- Spring Boot runner: executes submitted code through Docker and returns a batch judge result.
+- PostgreSQL: stores problems, examples, hidden testcases, submissions, and final judge results.
+- Redis: local async dispatch path.
+- Cloud Tasks: deployment async dispatch path.
+- Docker: isolated execution for C++, Java, and Python.
+
+Out of scope for this repository:
+
+- Next.js Web/API implementation
+- ranking
+- plagiarism detection
+- special judge
+- advanced sandbox hardening
+- realtime/SSE push
+
+## Architecture Summary
 
 ```text
-submission created
--> submissionId dispatched
--> JudgeService
--> hidden problem_testcases executed by testcase_order
--> stop immediately on first WA/TLE/RE/MLE
--> update submissions with final result only
+Web/API
+-> create submissions row
+-> dispatch submissionId
+-> orchestrator
+-> load submission + hidden testcases
+-> runner or local Docker executor
+-> stop at first failed testcase
+-> save final result to submissions
 ```
 
-The worker no longer writes testcase-level result rows. A submission result is
-stored in `submissions` with:
+Deployment-oriented split:
+
+```text
+Cloud Tasks
+-> Cloud Run orchestrator /internal/judge-executions
+-> remote runner /internal/runner-executions
+-> Docker sandbox
+-> PostgreSQL result update
+```
+
+The runner is execution-only. It does not use PostgreSQL, Redis, or Cloud Tasks directly.
+
+## Judging Model
+
+- Hidden testcases are executed by `testcase_order`.
+- The runner executes testcases in batch, not one container per testcase.
+- Judging stops immediately on the first `WA`, `TLE`, `RE`, or `MLE`.
+- Submission-level `execution_time_ms` and `memory_kb` store the maximum value among executed testcases.
+- Testcase-level result rows are not persisted.
+
+Final result fields are stored in `submissions`:
 
 - `status`
 - `result`
@@ -39,7 +69,7 @@ stored in `submissions` with:
 
 ## DB Baseline
 
-The active JPA mappings use these tables:
+Active JPA tables:
 
 - `users`
 - `problems`
@@ -47,39 +77,51 @@ The active JPA mappings use these tables:
 - `problem_testcases`
 - `submissions`
 
-Important IDs:
+ID policy:
 
-- `problems.id`: `String`
-- `submissions.id`: `Long`
-- `problem_testcases.id`: `Long`
+| Entity | ID type |
+| --- | --- |
+| `users.id` | `UUID` |
+| `problems.id` | `Long` |
+| `problem_examples.id` | `Long` |
+| `problem_testcases.id` | `Long` |
+| `submissions.id` | `Long` |
 
-Note: this repository does not add DDL/migration files. If an existing DB still
-has `submission_testcase_results`, dropping it is a code-external follow-up.
+This repository does not currently include DDL or migration files. Existing external DB schemas must be kept aligned separately.
 
-## Run
+## Run Locally
 
-Local:
+Requirements:
+
+- JDK 17
+- PostgreSQL
+- Redis
+- Docker daemon
 
 ```powershell
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
-Redis enqueue:
+Redis enqueue example:
 
 ```powershell
-redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
+redis-cli LPUSH judge:queue 1
 ```
 
-Tests:
+The Redis payload is a plain `submissionId` Long string.
+
+## Run Tests
 
 ```powershell
 .\gradlew.bat test
 ```
 
-## Docs
+## Main Docs
 
 - [Architecture](docs/architecture.md)
 - [Local Development](docs/local-development.md)
 - [Deployment](docs/deployment.md)
 - [Judging Model](docs/judging-model.md)
 - [Validation Checklist](docs/validation-checklist.md)
+
+Older documents under `docs/archive/` are historical references only. Prefer the main docs above when they conflict.
