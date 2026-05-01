@@ -1,7 +1,6 @@
 # Validation Checklist
 
-This document lists manual checks and automated test expectations for the
-current worker.
+This document lists manual checks and automated test expectations for the current worker.
 
 ## Basic Run
 
@@ -14,7 +13,7 @@ Local run:
 Redis enqueue:
 
 ```powershell
-redis-cli LPUSH judge:queue 00000000-0000-0000-0000-000000000001
+redis-cli LPUSH judge:queue 1
 ```
 
 Tests:
@@ -40,6 +39,18 @@ from submissions
 where id = :submission_id;
 ```
 
+## ID Check
+
+| Table | Expected ID type |
+| --- | --- |
+| `users` | UUID |
+| `problems` | Long / identity |
+| `problem_examples` | Long / identity |
+| `problem_testcases` | Long / identity |
+| `submissions` | Long / identity |
+
+Redis and Cloud Tasks payloads must contain a Long `submissionId`, for example `1`.
+
 ## Judge Result Expectations
 
 | Scenario | Expected value |
@@ -54,8 +65,7 @@ Only `submissions` is updated with the final result.
 
 ## Time And Memory
 
-When multiple testcases are executed, submission-level values use the maximum
-among executed testcases.
+When multiple testcases are executed, submission-level values use the maximum among executed testcases.
 
 Example:
 
@@ -69,7 +79,7 @@ Expected:
 - `submissions.execution_time_ms = 6`
 - `submissions.memory_kb = 128`
 
-Local Docker executor may return `null` for real memory usage.
+Local Docker executor may return `null` for real memory usage depending on environment and image support.
 
 ## Remote Validation
 
@@ -85,18 +95,27 @@ Orchestrator:
 .\gradlew.bat bootRun --args="--spring.profiles.active=remote --server.port=8080 --judge.execution.remote.base-url=http://localhost:8081"
 ```
 
-Trigger:
+Trigger orchestrator:
 
 ```powershell
 curl -X POST http://localhost:8080/internal/judge-executions ^
   -H "Content-Type: application/json" ^
-  -d "{\"submissionId\":\"00000000-0000-0000-0000-000000000001\"}"
+  -d "{\"submissionId\":1}"
+```
+
+Direct runner check:
+
+```powershell
+curl -X POST http://localhost:8081/internal/runner-executions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"submissionId\":1,\"problemId\":1,\"language\":\"python\",\"sourceCode\":\"a,b=map(int,input().split())\nprint(a+b)\",\"testCases\":[{\"testCaseOrder\":1,\"input\":\"1 2\n\",\"expectedOutput\":\"3\n\"}],\"timeLimitMs\":3000,\"memoryLimitMb\":128}"
 ```
 
 Check:
 
 - orchestrator accepts `/internal/judge-executions`
 - runner accepts `/internal/runner-executions`
+- runner request uses `testCases` array
 - runner executes without DB/Redis
 - orchestrator saves final result to `submissions`
 
@@ -116,9 +135,11 @@ Check:
 - Cloud Tasks payload contains a Long `submissionId`
 - Redis local payload is a plain Long string
 - runner host has Docker daemon if Docker execution is used
+- runner images contain required runtime tools for batch execution
+- orchestrator can reach runner base URL
+- `/internal/judge-executions` and `/internal/runner-executions` are not treated as public APIs
 
 ## Archive Reference
 
 Older E2E/demo/cleanup/concurrency/C++ notes live under `docs/archive/`.
-Those files are historical references and may mention removed testcase result
-storage.
+Those files are historical references and may mention removed testcase result storage or older UUID payload examples.
