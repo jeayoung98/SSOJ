@@ -185,7 +185,3 @@ curl -X POST http://localhost:8080/internal/judge-executions ^
 - [Deployment](docs/deployment.md)
 - [Judging Model](docs/judging-model.md)
 - [Validation Checklist](docs/validation-checklist.md)
-
-## 포트폴리오 핵심 문장
-
-SSOJ는 Next.js Web/API, Cloud Run Orchestrator, Cloud Tasks, GCE Runner VM, Docker Sandbox, PostgreSQL/Supabase를 조합해 사용자 코드 제출 이후의 비동기 채점 파이프라인을 구현한 온라인 저지 시스템입니다.
