@@ -190,6 +190,9 @@ public class DockerProcessExecutor {
             logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
             return JudgeRunResult.systemError();
         }
+        if (batchResult.result() == SubmissionResult.WA) {
+            logWrongAnswerDetails(context.submissionId(), workspaceDirectory, batchResult);
+        }
 
         return new JudgeRunResult(
                 batchResult.result(),
@@ -336,7 +339,7 @@ public class DockerProcessExecutor {
                     timeout "$COMPILE_TIMEOUT_SECONDS"s /usr/bin/bash -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
                     compile_exit=$?
                     if [ "$compile_exit" -ne 0 ]; then
-                      write_result CE "" "" ""
+                      write_result CE "" "" "" ""
                       exit 0
                     fi
 
@@ -369,11 +372,13 @@ public class DockerProcessExecutor {
                   failed_order="$2"
                   execution_time="$3"
                   memory_usage="$4"
-                  printf '{"result":"%%s","executionTimeMs":%%s,"memoryUsageKb":%%s,"failedTestcaseOrder":%%s}\\n' \\
+                  failed_file_index="$5"
+                  printf '{"result":"%%s","executionTimeMs":%%s,"memoryUsageKb":%%s,"failedTestcaseOrder":%%s,"failedFileIndex":%%s}\\n' \\
                     "$result" \\
                     "$(json_number_or_null "$execution_time")" \\
                     "$(json_number_or_null "$memory_usage")" \\
-                    "$(json_number_or_null "$failed_order")" > result.json
+                    "$(json_number_or_null "$failed_order")" \\
+                    "$(json_number_or_null "$failed_file_index")" > result.json
                 }
 
                 update_max() {
@@ -442,33 +447,33 @@ public class DockerProcessExecutor {
                   update_max "$parsed_time" "$parsed_mem"
 
                   if [ "$run_exit" -eq 124 ]; then
-                    write_result TLE "$order" "$max_time" "$max_mem"
+                    write_result TLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ "$run_exit" -eq 137 ]; then
-                    write_result MLE "$order" "$max_time" "$max_mem"
+                    write_result MLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ -n "$parsed_mem" ] && [ "$parsed_mem" -gt "$MEMORY_LIMIT_KB" ]; then
-                    write_result MLE "$order" "$max_time" "$max_mem"
+                    write_result MLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ "$run_exit" -ne 0 ]; then
-                    write_result RE "$order" "$max_time" "$max_mem"
+                    write_result RE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
 
                   normalize_output "$output_file" actual_normalized.txt
                   normalize_output "expected_$i.txt" expected_normalized.txt
                   if ! cmp -s actual_normalized.txt expected_normalized.txt; then
-                    write_result WA "$order" "$max_time" "$max_mem"
+                    write_result WA "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
 
                   i=$((i + 1))
                 done
 
-                write_result AC "" "$max_time" "$max_mem"
+                write_result AC "" "$max_time" "$max_mem" ""
                 exit 0
                 """.formatted(
                 context.hiddenTestCases().size(),
@@ -515,6 +520,39 @@ public class DockerProcessExecutor {
             logBatchErrorFiles(submissionId, workspaceDirectory);
         } catch (Exception exception) {
             log.error("Failed to log batch diagnostics for submission {}", submissionId, exception);
+        }
+    }
+
+    private void logWrongAnswerDetails(Long submissionId, Path workspaceDirectory, BatchResult batchResult) {
+        Integer fileIndex = batchResult.failedFileIndex();
+        Integer testcaseOrder = batchResult.failedTestcaseOrder();
+        if (fileIndex == null) {
+            log.error(
+                    "Wrong answer occurred but failedFileIndex is missing. submissionId={} testcaseOrder={}",
+                    submissionId,
+                    testcaseOrder
+            );
+            return;
+        }
+
+        try {
+            log.error(
+                    "Wrong answer details. submissionId={} fileIndex={} testcaseOrder={} input={} expected={} output={}",
+                    submissionId,
+                    fileIndex,
+                    testcaseOrder,
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("input_" + fileIndex + ".txt"))),
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("expected_" + fileIndex + ".txt"))),
+                    abbreviate(readWorkspaceFile(workspaceDirectory.resolve("output_" + fileIndex + ".txt")))
+            );
+        } catch (Exception exception) {
+            log.error(
+                    "Failed to log wrong answer details. submissionId={} fileIndex={} testcaseOrder={}",
+                    submissionId,
+                    fileIndex,
+                    testcaseOrder,
+                    exception
+            );
         }
     }
 
@@ -703,7 +741,8 @@ public class DockerProcessExecutor {
             SubmissionResult result,
             Integer executionTimeMs,
             Integer memoryUsageKb,
-            Integer failedTestcaseOrder
+            Integer failedTestcaseOrder,
+            Integer failedFileIndex
     ) {
     }
 }

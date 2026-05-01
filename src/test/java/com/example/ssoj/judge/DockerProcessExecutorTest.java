@@ -9,6 +9,9 @@ import com.example.ssoj.judge.executor.DockerProcessExecutor;
 import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +21,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfSystemProperty(named = "run.docker.executor.tests", matches = "true")
+@ExtendWith(OutputCaptureExtension.class)
 class DockerProcessExecutorTest {
 
     @Test
@@ -159,7 +163,7 @@ class DockerProcessExecutorTest {
     }
 
     @Test
-    void executeBatch_runsPythonTestCasesInSingleContainerAndStopsAtWrongAnswer() throws Exception {
+    void executeBatch_runsPythonTestCasesInSingleContainerAndStopsAtWrongAnswer(CapturedOutput output) throws Exception {
         DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
         Path workspaceDirectory = Files.createTempDirectory("docker-batch-python-wa-test-");
 
@@ -177,9 +181,9 @@ class DockerProcessExecutorTest {
                             "python",
                             "",
                             List.of(
-                                    new HiddenTestCaseSnapshot(1L, 1, "ok\n", "ok\n"),
-                                    new HiddenTestCaseSnapshot(2L, 2, "actual\n", "expected\n"),
-                                    new HiddenTestCaseSnapshot(3L, 3, "skip\n", "skip\n")
+                                    new HiddenTestCaseSnapshot(1L, 3, "ok\n", "ok\n"),
+                                    new HiddenTestCaseSnapshot(2L, 7, "actual\n", "expected\n"),
+                                    new HiddenTestCaseSnapshot(3L, 9, "skip\n", "skip\n")
                             ),
                             3000,
                             128
@@ -193,10 +197,14 @@ class DockerProcessExecutorTest {
             );
 
             assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
-            assertThat(result.failedTestcaseOrder()).isEqualTo(2);
+            assertThat(result.failedTestcaseOrder()).isEqualTo(7);
             assertThat(result.executionTimeMs()).isNotNull();
             assertThat(result.memoryKb()).isNotNull();
             assertThat(Files.exists(workspaceDirectory.resolve("output_3.txt"))).isFalse();
+            assertThat(output).contains("fileIndex=2");
+            assertThat(output).contains("testcaseOrder=7");
+            assertThat(output).contains("actual");
+            assertThat(output).contains("expected");
         } finally {
             deleteDirectory(workspaceDirectory);
         }
