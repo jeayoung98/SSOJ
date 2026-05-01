@@ -1,7 +1,6 @@
 package com.example.ssoj.judge;
 
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
-import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
@@ -30,8 +29,7 @@ class CppExecutorTest {
     void executeSubmission_deletesTempDirectoryAfterSuccessfulExecution() {
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
                 List.of(
-                        new JudgeExecutionResult(true, "3\n", "", 0, 35, 512, false, false, false, false),
-                        new JudgeExecutionResult(true, "5\n", "", 0, 18, 256, false, false, false, false)
+                        new JudgeRunResult(SubmissionResult.AC, 35, 512, null)
                 )
         );
         CppExecutor cppExecutor = new CppExecutor(
@@ -48,8 +46,7 @@ class CppExecutorTest {
         assertThat(result.finalResult()).isEqualTo(SubmissionResult.AC);
         assertThat(result.executionTimeMs()).isEqualTo(35);
         assertThat(result.memoryKb()).isEqualTo(512);
-        assertThat(dockerProcessExecutor.compileCallCount).isEqualTo(1);
-        assertThat(dockerProcessExecutor.runCallCount).isEqualTo(2);
+        assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
 
@@ -57,9 +54,7 @@ class CppExecutorTest {
     void executeSubmission_returnsMaxMetricsUntilFirstWrongAnswer() {
         RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
                 List.of(
-                        new JudgeExecutionResult(true, "3\n", "", 0, 40, 700, false, false, false, false),
-                        new JudgeExecutionResult(true, "wrong\n", "", 0, 10, 100, false, false, false, false),
-                        new JudgeExecutionResult(true, "5\n", "", 0, 99, 900, false, false, false, false)
+                        new JudgeRunResult(SubmissionResult.WA, 40, 700, 2)
                 )
         );
         CppExecutor cppExecutor = new CppExecutor(
@@ -77,7 +72,30 @@ class CppExecutorTest {
         assertThat(result.executionTimeMs()).isEqualTo(40);
         assertThat(result.memoryKb()).isEqualTo(700);
         assertThat(result.failedTestcaseOrder()).isEqualTo(2);
-        assertThat(dockerProcessExecutor.runCallCount).isEqualTo(2);
+        assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
+    }
+
+    @Test
+    void executeSubmission_returnsTleFromBatchExecution() {
+        RecordingDockerProcessExecutor dockerProcessExecutor = new RecordingDockerProcessExecutor(
+                List.of(new JudgeRunResult(SubmissionResult.TLE, 1000, 200, 2))
+        );
+        CppExecutor cppExecutor = new CppExecutor(
+                "gcc:13",
+                15000L,
+                "g++ main.cpp -O2 -std=c++17 -o main",
+                "./main",
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
+        );
+
+        JudgeRunResult result = cppExecutor.executeSubmission(context());
+
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.TLE);
+        assertThat(result.executionTimeMs()).isEqualTo(1000);
+        assertThat(result.memoryKb()).isEqualTo(200);
+        assertThat(result.failedTestcaseOrder()).isEqualTo(2);
+        assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
     }
 
     @Test
@@ -114,26 +132,26 @@ class CppExecutorTest {
     }
 
     static class RecordingDockerProcessExecutor extends DockerProcessExecutor {
-        private final Queue<JudgeExecutionResult> runResults;
+        private final Queue<JudgeRunResult> runResults;
         private Path workspaceDirectory;
-        private int compileCallCount;
-        private int runCallCount;
+        private int batchCallCount;
 
-        RecordingDockerProcessExecutor(List<JudgeExecutionResult> runResults) {
+        RecordingDockerProcessExecutor(List<JudgeRunResult> runResults) {
             this.runResults = new ArrayDeque<>(runResults);
         }
 
         @Override
-        public JudgeExecutionResult executeCompile(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String compileCommand, long compileTimeoutMs) {
+        public JudgeRunResult executeBatch(
+                JudgeRunContext context,
+                Path workspaceDirectory,
+                String dockerImage,
+                int dockerMemoryMb,
+                String compileCommand,
+                Long compileTimeoutMs,
+                String runCommand
+        ) {
             this.workspaceDirectory = workspaceDirectory;
-            this.compileCallCount++;
-            return new JudgeExecutionResult(true, "", "", 0, null, null, false, false, false, false);
-        }
-
-        @Override
-        public JudgeExecutionResult executeRun(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String runCommand) {
-            this.workspaceDirectory = workspaceDirectory;
-            this.runCallCount++;
+            this.batchCallCount++;
             return runResults.remove();
         }
     }
@@ -142,7 +160,15 @@ class CppExecutorTest {
         private Path workspaceDirectory;
 
         @Override
-        public JudgeExecutionResult executeCompile(JudgeContext context, Path workspaceDirectory, String dockerImage, int dockerMemoryMb, String compileCommand, long compileTimeoutMs) throws IOException {
+        public JudgeRunResult executeBatch(
+                JudgeRunContext context,
+                Path workspaceDirectory,
+                String dockerImage,
+                int dockerMemoryMb,
+                String compileCommand,
+                Long compileTimeoutMs,
+                String runCommand
+        ) throws IOException {
             this.workspaceDirectory = workspaceDirectory;
             throw new IOException("docker start failed");
         }

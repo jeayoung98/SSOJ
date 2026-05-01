@@ -1,7 +1,12 @@
 package com.example.ssoj.judge.executor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -21,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 public class DockerProcessExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(DockerProcessExecutor.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final String CPU_LIMIT = "1";
     private static final long COMMAND_TIMEOUT_BUFFER_MS = 5000L;
     private static final Pattern ELAPSED_TIME_PATTERN = Pattern.compile(
@@ -112,6 +118,66 @@ public class DockerProcessExecutor {
                 timedOut,
                 false,
                 memoryLimitExceeded
+        );
+    }
+
+    public JudgeRunResult executeBatch(
+            JudgeRunContext context,
+            Path workspaceDirectory,
+            String dockerImage,
+            int dockerMemoryMb,
+            String compileCommand,
+            Long compileTimeoutMs,
+            String runCommand
+    ) throws IOException, InterruptedException {
+        writeBatchTestCaseFiles(context, workspaceDirectory);
+
+        Path resultFile = workspaceDirectory.resolve("result.json");
+        Path scriptFile = workspaceDirectory.resolve("run_all.sh");
+        Files.deleteIfExists(resultFile);
+        Files.writeString(
+                scriptFile,
+                buildRunAllScript(context, compileCommand, compileTimeoutMs, runCommand),
+                StandardCharsets.UTF_8
+        );
+
+        long waitTimeoutMs = resolveBatchWaitTimeoutMs(context, compileTimeoutMs);
+        CommandResult result = runInContainer(
+                new JudgeContext(
+                        context.submissionId(),
+                        context.problemId(),
+                        context.language(),
+                        context.sourceCode(),
+                        "",
+                        context.timeLimitMs(),
+                        context.memoryLimitMb()
+                ),
+                workspaceDirectory,
+                dockerImage,
+                dockerMemoryMb,
+                "sh /workspace/run_all.sh",
+                waitTimeoutMs,
+                null
+        );
+
+        if (result.systemError()) {
+            return JudgeRunResult.systemError();
+        }
+
+        if (!Files.exists(resultFile)) {
+            return JudgeRunResult.systemError();
+        }
+
+        BatchResult batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
+        if (batchResult.result() == null) {
+            return JudgeRunResult.systemError();
+        }
+
+        return new JudgeRunResult(
+                batchResult.result(),
+                batchResult.executionTimeMs(),
+                batchResult.memoryUsageKb(),
+                batchResult.failedTestcaseOrder()
         );
     }
 
@@ -215,6 +281,197 @@ public class DockerProcessExecutor {
                 + "s "
                 + runCommand
                 + " < /workspace/input.txt > /workspace/output.txt 2> /workspace/error.txt";
+    }
+
+    private void writeBatchTestCaseFiles(JudgeRunContext context, Path workspaceDirectory) throws IOException {
+        for (int index = 0; index < context.hiddenTestCases().size(); index++) {
+            HiddenTestCaseSnapshot testCase = context.hiddenTestCases().get(index);
+            int fileIndex = index + 1;
+            Files.writeString(
+                    workspaceDirectory.resolve("input_" + fileIndex + ".txt"),
+                    testCase.input() == null ? "" : testCase.input(),
+                    StandardCharsets.UTF_8
+            );
+            Files.writeString(
+                    workspaceDirectory.resolve("expected_" + fileIndex + ".txt"),
+                    testCase.expectedOutput() == null ? "" : testCase.expectedOutput(),
+                    StandardCharsets.UTF_8
+            );
+            Files.writeString(
+                    workspaceDirectory.resolve("order_" + fileIndex + ".txt"),
+                    String.valueOf(testCase.testCaseOrder()),
+                    StandardCharsets.UTF_8
+            );
+        }
+    }
+
+    private String buildRunAllScript(
+            JudgeRunContext context,
+            String compileCommand,
+            Long compileTimeoutMs,
+            String runCommand
+    ) {
+        String timeoutSeconds = toTimeoutSeconds(context.timeLimitMs());
+        String compileBlock = "";
+        if (compileCommand != null && !compileCommand.isBlank()) {
+            compileBlock = """
+                    timeout "$COMPILE_TIMEOUT_SECONDS"s sh -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
+                    compile_exit=$?
+                    if [ "$compile_exit" -ne 0 ]; then
+                      write_result CE "" "" ""
+                      exit 0
+                    fi
+
+                    """;
+        }
+
+        return """
+                #!/bin/sh
+                set +e
+
+                TEST_COUNT=%d
+                TIME_LIMIT_SECONDS=%s
+                MEMORY_LIMIT_KB=%d
+                COMPILE_TIMEOUT_SECONDS=%s
+                COMPILE_COMMAND=%s
+                RUN_COMMAND=%s
+                max_time=""
+                max_mem=""
+
+                json_number_or_null() {
+                  if [ -z "$1" ]; then
+                    printf 'null'
+                  else
+                    printf '%%s' "$1"
+                  fi
+                }
+
+                write_result() {
+                  result="$1"
+                  failed_order="$2"
+                  execution_time="$3"
+                  memory_usage="$4"
+                  printf '{"result":"%%s","executionTimeMs":%%s,"memoryUsageKb":%%s,"failedTestcaseOrder":%%s}\\n' \\
+                    "$result" \\
+                    "$(json_number_or_null "$execution_time")" \\
+                    "$(json_number_or_null "$memory_usage")" \\
+                    "$(json_number_or_null "$failed_order")" > result.json
+                }
+
+                update_max() {
+                  time_value="$1"
+                  mem_value="$2"
+                  if [ -n "$time_value" ] && { [ -z "$max_time" ] || [ "$time_value" -gt "$max_time" ]; }; then
+                    max_time="$time_value"
+                  fi
+                  if [ -n "$mem_value" ] && { [ -z "$max_mem" ] || [ "$mem_value" -gt "$max_mem" ]; }; then
+                    max_mem="$mem_value"
+                  fi
+                }
+
+                elapsed_to_ms() {
+                  awk -v value="$1" 'BEGIN {
+                    n = split(value, parts, ":")
+                    if (n == 2) {
+                      total = (parts[1] * 60) + parts[2]
+                    } else if (n == 3) {
+                      total = (parts[1] * 3600) + (parts[2] * 60) + parts[3]
+                    } else {
+                      total = 0
+                    }
+                    printf "%%d", (total * 1000) + 0.5
+                  }'
+                }
+
+                parse_usage() {
+                  usage_file="$1"
+                  if [ ! -f "$usage_file" ]; then
+                    parsed_time=""
+                    parsed_mem=""
+                    return
+                  fi
+                  elapsed="$(grep 'Elapsed (wall clock)' "$usage_file" | sed 's/^.*):[[:space:]]*//')"
+                  parsed_time="$(elapsed_to_ms "$elapsed")"
+                  parsed_mem="$(grep 'Maximum resident set size' "$usage_file" | sed 's/^.*:[[:space:]]*//')"
+                }
+
+                normalize_output() {
+                  source_file="$1"
+                  target_file="$2"
+                  if [ ! -f "$source_file" ]; then
+                    : > "$target_file"
+                    return
+                  fi
+                  sed 's/\\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//' "$source_file" > "$target_file"
+                }
+
+                %s
+                i=1
+                while [ "$i" -le "$TEST_COUNT" ]; do
+                  order="$(cat "order_$i.txt")"
+                  usage_file="usage_$i.txt"
+                  output_file="output_$i.txt"
+                  error_file="error_$i.txt"
+                  rm -f "$usage_file" "$output_file" "$error_file" actual_normalized.txt expected_normalized.txt
+
+                  /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s sh -lc "$RUN_COMMAND" \\
+                    < "input_$i.txt" > "$output_file" 2> "$error_file"
+                  run_exit=$?
+                  parse_usage "$usage_file"
+                  if [ "$run_exit" -eq 124 ] && [ -z "$parsed_time" ]; then
+                    parsed_time=%d
+                  fi
+                  update_max "$parsed_time" "$parsed_mem"
+
+                  if [ "$run_exit" -eq 124 ]; then
+                    write_result TLE "$order" "$max_time" "$max_mem"
+                    exit 0
+                  fi
+                  if [ "$run_exit" -eq 137 ]; then
+                    write_result MLE "$order" "$max_time" "$max_mem"
+                    exit 0
+                  fi
+                  if [ -n "$parsed_mem" ] && [ "$parsed_mem" -gt "$MEMORY_LIMIT_KB" ]; then
+                    write_result MLE "$order" "$max_time" "$max_mem"
+                    exit 0
+                  fi
+                  if [ "$run_exit" -ne 0 ]; then
+                    write_result RE "$order" "$max_time" "$max_mem"
+                    exit 0
+                  fi
+
+                  normalize_output "$output_file" actual_normalized.txt
+                  normalize_output "expected_$i.txt" expected_normalized.txt
+                  if ! cmp -s actual_normalized.txt expected_normalized.txt; then
+                    write_result WA "$order" "$max_time" "$max_mem"
+                    exit 0
+                  fi
+
+                  i=$((i + 1))
+                done
+
+                write_result AC "" "$max_time" "$max_mem"
+                exit 0
+                """.formatted(
+                context.hiddenTestCases().size(),
+                timeoutSeconds,
+                context.memoryLimitMb() == null ? 0 : context.memoryLimitMb() * 1024,
+                toTimeoutSeconds(compileTimeoutMs == null ? 0 : compileTimeoutMs.intValue()),
+                shellSingleQuote(compileCommand == null ? "" : compileCommand),
+                shellSingleQuote(runCommand),
+                compileBlock,
+                context.timeLimitMs() == null ? 0 : context.timeLimitMs()
+        );
+    }
+
+    private long resolveBatchWaitTimeoutMs(JudgeRunContext context, Long compileTimeoutMs) {
+        long perCaseTimeoutMs = (context.timeLimitMs() == null ? 0L : context.timeLimitMs()) + COMMAND_TIMEOUT_BUFFER_MS;
+        long compileMs = compileTimeoutMs == null ? 0L : compileTimeoutMs;
+        return compileMs + (perCaseTimeoutMs * context.hiddenTestCases().size()) + COMMAND_TIMEOUT_BUFFER_MS;
+    }
+
+    private String shellSingleQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     private String toTimeoutSeconds(Integer timeLimitMs) {
@@ -344,6 +601,14 @@ public class DockerProcessExecutor {
     private record UsageMetrics(
             Integer executionTimeMs,
             Integer memoryUsageKb
+    ) {
+    }
+
+    private record BatchResult(
+            SubmissionResult result,
+            Integer executionTimeMs,
+            Integer memoryUsageKb,
+            Integer failedTestcaseOrder
     ) {
     }
 }

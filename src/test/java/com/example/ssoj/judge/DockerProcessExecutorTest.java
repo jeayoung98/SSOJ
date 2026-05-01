@@ -2,12 +2,18 @@ package com.example.ssoj.judge;
 
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
+import com.example.ssoj.judge.domain.model.JudgeRunContext;
+import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.executor.DockerProcessExecutor;
+import com.example.ssoj.submission.domain.SubmissionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,6 +155,105 @@ class DockerProcessExecutorTest {
                             });
                 }
             }
+        }
+    }
+
+    @Test
+    void executeBatch_runsPythonTestCasesInSingleContainerAndStopsAtWrongAnswer() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-batch-python-wa-test-");
+
+        try {
+            Files.writeString(
+                    workspaceDirectory.resolve("main.py"),
+                    "print(input())",
+                    StandardCharsets.UTF_8
+            );
+
+            JudgeRunResult result = dockerProcessExecutor.executeBatch(
+                    new JudgeRunContext(
+                            103L,
+                            203L,
+                            "python",
+                            "",
+                            List.of(
+                                    new HiddenTestCaseSnapshot(1L, 1, "ok\n", "ok\n"),
+                                    new HiddenTestCaseSnapshot(2L, 2, "actual\n", "expected\n"),
+                                    new HiddenTestCaseSnapshot(3L, 3, "skip\n", "skip\n")
+                            ),
+                            3000,
+                            128
+                    ),
+                    workspaceDirectory,
+                    "python:3.11",
+                    128,
+                    null,
+                    null,
+                    "python3 main.py"
+            );
+
+            assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
+            assertThat(result.failedTestcaseOrder()).isEqualTo(2);
+            assertThat(result.executionTimeMs()).isNotNull();
+            assertThat(result.memoryKb()).isNotNull();
+            assertThat(Files.exists(workspaceDirectory.resolve("output_3.txt"))).isFalse();
+        } finally {
+            deleteDirectory(workspaceDirectory);
+        }
+    }
+
+    @Test
+    void executeBatch_returnsCompileErrorForJava() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-batch-java-ce-test-");
+
+        try {
+            Files.writeString(
+                    workspaceDirectory.resolve("Main.java"),
+                    "public class Main { syntax error }",
+                    StandardCharsets.UTF_8
+            );
+
+            JudgeRunResult result = dockerProcessExecutor.executeBatch(
+                    new JudgeRunContext(
+                            104L,
+                            204L,
+                            "java",
+                            "",
+                            List.of(new HiddenTestCaseSnapshot(1L, 1, "", "")),
+                            3000,
+                            128
+                    ),
+                    workspaceDirectory,
+                    "eclipse-temurin:17-jdk",
+                    256,
+                    "javac Main.java",
+                    15000L,
+                    "java -Xmx128m Main"
+            );
+
+            assertThat(result.finalResult()).isEqualTo(SubmissionResult.CE);
+            assertThat(result.failedTestcaseOrder()).isNull();
+            assertThat(result.executionTimeMs()).isNull();
+            assertThat(result.memoryKb()).isNull();
+        } finally {
+            deleteDirectory(workspaceDirectory);
+        }
+    }
+
+    private void deleteDirectory(Path directory) throws Exception {
+        if (!Files.exists(directory)) {
+            return;
+        }
+
+        try (var paths = Files.walk(directory)) {
+            paths.sorted((left, right) -> right.compareTo(left))
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (Exception ignored) {
+                        }
+                    });
         }
     }
 }
