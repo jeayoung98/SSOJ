@@ -6,6 +6,8 @@ import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionRequest;
 import com.example.ssoj.judge.presentation.dto.RunnerExecutionResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,8 @@ import java.util.List;
 @Component
 @ConditionalOnProperty(name = "judge.execution.mode", havingValue = "remote")
 public class RemoteExecutionGateway implements ExecutionGateway {
+
+    private static final Logger log = LoggerFactory.getLogger(RemoteExecutionGateway.class);
 
     private final RemoteExecutionClient remoteExecutionClient;
     private final List<String> supportedLanguages;
@@ -52,6 +56,7 @@ public class RemoteExecutionGateway implements ExecutionGateway {
                     response.failedTestcaseOrder()
             );
         } catch (Exception exception) {
+            log.error("Remote execution failed. submissionId={}", context.submissionId(), exception);
             return JudgeRunResult.systemError();
         }
     }

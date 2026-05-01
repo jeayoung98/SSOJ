@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.List;
 
@@ -20,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class RemoteExecutionGatewayTest {
 
     @Mock
@@ -61,7 +63,7 @@ class RemoteExecutionGatewayTest {
     }
 
     @Test
-    void executeSubmission_returnsSystemErrorWhenRemoteClientFails() {
+    void executeSubmission_returnsSystemErrorWhenRemoteClientFailsAndLogsException(CapturedOutput output) {
         RemoteExecutionGateway gateway = new RemoteExecutionGateway(remoteExecutionClient, "java,python,cpp");
         JudgeRunContext context = new JudgeRunContext(1L, 2L, "python", "print(1)", List.of(), 1000, 128);
 
@@ -71,6 +73,8 @@ class RemoteExecutionGatewayTest {
         JudgeRunResult result = gateway.executeSubmission(context);
 
         assertThat(result.finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
+        assertThat(output).contains("Remote execution failed. submissionId=1");
+        assertThat(output).contains("java.lang.IllegalStateException: runner unavailable");
     }
 
     @Test
