@@ -1,45 +1,45 @@
-# Architecture
+# 아키텍처
 
-This document describes the current SSOJ judging backend architecture.
+이 문서는 현재 SSOJ 채점 백엔드 아키텍처를 설명합니다.
 
-## Repository Boundary
+## 저장소 경계
 
-This repository contains the Spring Boot judging backend.
+이 저장소는 Spring Boot 기반 채점 백엔드를 포함합니다.
 
-It does not contain the Next.js Web/API code. The Web/API layer is an external client that creates a `submissions` row first and then dispatches the created `submissionId`.
+Next.js Web/API 코드는 포함하지 않습니다. Web/API 계층은 이 저장소 외부의 클라이언트이며, 먼저 `submissions` row를 생성한 뒤 생성된 `submissionId`로 채점을 요청합니다.
 
-## Components
+## 구성 요소
 
-| Component | Role |
+| 구성 요소 | 역할 |
 | --- | --- |
-| Web/API | Creates submissions and requests judging. External to this repository. |
-| Spring Boot orchestrator | Loads DB state, coordinates judging, and saves final results. |
-| Spring Boot runner | Executes submitted code through Docker and returns the final batch result. |
-| PostgreSQL | Stores users, problems, examples, hidden testcases, submissions, and final results. |
-| Redis | Local async dispatch path. |
-| Cloud Tasks | Deployment async dispatch path. |
-| Docker executor | Compiles/runs C++, Java, and Python code in isolated containers. |
+| Web/API | 제출을 생성하고 채점을 요청합니다. 이 저장소 외부에 있습니다. |
+| Spring Boot orchestrator | DB 상태를 조회하고 채점을 조율하며 최종 결과를 저장합니다. |
+| Spring Boot runner | Docker를 통해 제출 코드를 실행하고 최종 batch 결과를 반환합니다. |
+| PostgreSQL | 사용자, 문제, 예제, hidden testcase, 제출, 최종 결과를 저장합니다. |
+| Redis | 로컬 비동기 dispatch 경로입니다. |
+| Cloud Tasks | 배포 환경의 비동기 dispatch 경로입니다. |
+| Docker executor | C++, Java, Python 코드를 격리 컨테이너에서 컴파일/실행합니다. |
 
-## Main Packages
+## 주요 패키지
 
-| Path | Role |
+| 경로 | 역할 |
 | --- | --- |
-| `judge/application/sevice` | Judge flow, queue consumer, persistence, runner service |
-| `judge/domain/model` | Judge commands, context snapshots, and result records |
-| `judge/executor` | Language-specific Docker execution |
+| `judge/application/sevice` | 채점 흐름, queue consumer, persistence, runner service |
+| `judge/domain/model` | 채점 command, context snapshot, result record |
+| `judge/executor` | 언어별 Docker 실행 |
 | `judge/infrastructure/redis` | Redis dispatch |
 | `judge/infrastructure/cloudtasks` | Cloud Tasks dispatch |
-| `judge/infrastructure/remote` | Remote runner HTTP client |
-| `judge/presentation` | Internal HTTP endpoints |
-| `problem`, `testcase`, `submission`, `user` | JPA entity/repository packages |
+| `judge/infrastructure/remote` | remote runner HTTP client |
+| `judge/presentation` | 내부 HTTP endpoint |
+| `problem`, `testcase`, `submission`, `user` | JPA entity/repository 패키지 |
 
-Note: the package name `sevice` is currently used in code and should be treated as the actual current path unless it is refactored later.
+주의: 현재 코드에는 `sevice`라는 패키지명이 실제로 사용되고 있습니다. 추후 리팩터링하기 전까지는 이 경로를 현재 기준으로 봅니다.
 
-## Local Redis Flow
+## 로컬 Redis 흐름
 
 ```text
-Web/API or manual test
--> Redis judge:queue receives submissionId(Long)
+Web/API 또는 수동 테스트
+-> Redis judge:queue에 submissionId(Long) 적재
 -> JudgeQueueConsumer
 -> JudgeService
 -> JudgePersistenceService.startJudging
@@ -48,33 +48,33 @@ Web/API or manual test
 -> submissions result update
 ```
 
-## Deployment Flow
+## 배포 흐름
 
 ```text
 Web/API
--> create submissions row
--> Cloud Tasks task with submissionId(Long)
+-> submissions row 생성
+-> submissionId(Long)를 담은 Cloud Tasks task 생성
 -> orchestrator POST /internal/judge-executions
 -> JudgeService
 -> RemoteExecutionGateway
 -> runner POST /internal/runner-executions
 -> Docker batch execution
--> orchestrator saves final result to submissions
+-> orchestrator가 submissions에 최종 결과 저장
 ```
 
-## Orchestrator Responsibility
+## Orchestrator 책임
 
-The orchestrator:
+orchestrator는 다음을 담당합니다.
 
-1. receives or consumes `submissionId`
-2. changes `submissions.status` from `PENDING` to `JUDGING`
-3. loads source code, language, problem limits, and hidden testcases
-4. delegates execution locally or remotely
-5. saves final judge result to `submissions`
+1. `submissionId`를 수신하거나 소비합니다.
+2. `submissions.status`를 `PENDING`에서 `JUDGING`으로 변경합니다.
+3. source code, language, problem limit, hidden testcase를 조회합니다.
+4. 실행을 local 또는 remote runner로 위임합니다.
+5. 최종 채점 결과를 `submissions`에 저장합니다.
 
-It stores submission-level results only. It does not persist testcase-level result rows.
+orchestrator는 제출 단위 결과만 저장합니다. 테스트케이스별 결과 row는 저장하지 않습니다.
 
-## Runner Responsibility
+## Runner 책임
 
 ```text
 POST /internal/runner-executions
@@ -85,9 +85,9 @@ POST /internal/runner-executions
 -> RunnerExecutionResponse
 ```
 
-Runner mode is execution-only. It does not use DB, Redis, or Cloud Tasks directly.
+runner mode는 실행 전용입니다. DB, Redis, Cloud Tasks를 직접 사용하지 않습니다.
 
-Runner request shape:
+runner 요청 구조:
 
 ```json
 {
@@ -107,7 +107,7 @@ Runner request shape:
 }
 ```
 
-Runner response shape:
+runner 응답 구조:
 
 ```json
 {
@@ -118,21 +118,21 @@ Runner response shape:
 }
 ```
 
-## Judging Policy
+## 채점 정책
 
 ```text
-load hidden problem_testcases
--> execute by testcase_order
--> stop immediately on first WA/TLE/RE/MLE
--> aggregate max executionTimeMs and memoryKb among executed testcases
--> save final result to submissions
+hidden problem_testcases 조회
+-> testcase_order 순서로 실행
+-> 첫 WA/TLE/RE/MLE 발생 시 즉시 중단
+-> 실행된 testcase 중 executionTimeMs와 memoryKb 최댓값 집계
+-> submissions에 최종 결과 저장
 ```
 
-`CE` is treated as compile failure and is not tied to a testcase order. `SYSTEM_ERROR` is also not assumed to be caused by a specific testcase.
+`CE`는 컴파일 실패로 처리하며 특정 testcase order와 연결하지 않습니다. `SYSTEM_ERROR`도 특정 testcase에서 발생했다고 단정하지 않습니다.
 
-## DB Model
+## DB 모델
 
-Active tables expected by the current JPA model:
+현재 JPA 모델 기준 활성 테이블:
 
 - `users`
 - `problems`
@@ -140,7 +140,7 @@ Active tables expected by the current JPA model:
 - `problem_testcases`
 - `submissions`
 
-ID policy:
+ID 정책:
 
 | Entity | ID type |
 | --- | --- |
@@ -150,7 +150,7 @@ ID policy:
 | `problem_testcases.id` | `Long` |
 | `submissions.id` | `Long` |
 
-Submission state/result fields:
+제출 상태/결과 필드:
 
 - `submissions.status`: `PENDING`, `JUDGING`, `DONE`
 - `submissions.result`: `AC`, `WA`, `CE`, `RE`, `TLE`, `MLE`, `SYSTEM_ERROR`
@@ -160,11 +160,11 @@ Submission state/result fields:
 - `submissions.submitted_at`
 - `submissions.judged_at`
 
-## External Web/API Contract
+## 외부 Web/API 계약
 
-Web/API must create a `submissions` row before enqueue/dispatch.
+Web/API는 enqueue/dispatch 전에 반드시 `submissions` row를 먼저 생성해야 합니다.
 
-Required values:
+필수 값:
 
 - `id`: Long
 - `user_id`: UUID
@@ -174,7 +174,7 @@ Required values:
 - `status=PENDING`
 - `submitted_at`
 
-Redis local payload:
+Redis 로컬 payload:
 
 ```text
 judge:queue -> 1
