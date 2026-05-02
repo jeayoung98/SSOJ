@@ -115,6 +115,46 @@ class JudgePipelineIntegrationTest {
         assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
     }
 
+    @Test
+    void consume_finishesWithJudgeErrorWhenProblemHasNoTestcases() throws InterruptedException {
+        Problem problem = problemRepository.save(problem(1000, 128));
+        User user = userRepository.save(user());
+
+        Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
+        fakeLanguageExecutor.setResult(new JudgeRunResult(SubmissionResult.AC, 11, 128, null));
+
+        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
+        judgeQueueConsumer.consume();
+
+        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.JUDGE_ERROR, Duration.ofSeconds(5));
+
+        assertThat(finishedSubmission.getExecutionTimeMs()).isNull();
+        assertThat(finishedSubmission.getMemoryKb()).isNull();
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(fakeLanguageExecutor.executeSubmissionCount()).isEqualTo(0);
+    }
+
+    @Test
+    void consume_executesPublicTestcasesWhenHiddenTestcasesAreMissing() throws InterruptedException {
+        Problem problem = problemRepository.save(problem(1000, 128));
+        User user = userRepository.save(user());
+        testCaseRepository.save(testCase(problem, 1, "1 2", "3\n", false));
+
+        Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
+        fakeLanguageExecutor.setResult(new JudgeRunResult(SubmissionResult.AC, 13, 256, null));
+
+        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
+        judgeQueueConsumer.consume();
+
+        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.AC, Duration.ofSeconds(5));
+
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(13);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(256);
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(fakeLanguageExecutor.lastContext().hiddenTestCases()).hasSize(1);
+        assertThat(fakeLanguageExecutor.executeSubmissionCount()).isEqualTo(1);
+    }
+
     private Submission awaitSubmission(Long submissionId, SubmissionResult expectedResult, Duration timeout) throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {

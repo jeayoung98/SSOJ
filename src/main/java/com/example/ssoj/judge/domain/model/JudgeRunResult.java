@@ -20,4 +20,8 @@ public record JudgeRunResult(
     public static JudgeRunResult systemError() {
         return new JudgeRunResult(SubmissionResult.SYSTEM_ERROR, null, null);
     }
+
+    public static JudgeRunResult judgeError() {
+        return new JudgeRunResult(SubmissionResult.JUDGE_ERROR, null, null);
+    }
 }

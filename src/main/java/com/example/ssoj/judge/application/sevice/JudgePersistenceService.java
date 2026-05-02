@@ -5,6 +5,7 @@ import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.domain.model.StartedJudging;
 import com.example.ssoj.submission.domain.Submission;
 import com.example.ssoj.submission.infrastructure.SubmissionRepository;
+import com.example.ssoj.testcase.domain.ProblemTestcase;
 import com.example.ssoj.testcase.infrastructure.ProblemTestcaseRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,9 +52,12 @@ public class JudgePersistenceService {
             return null;
         }
 
-        List<HiddenTestCaseSnapshot> hiddenTestCases = problemTestcaseRepository
-                .findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(submission.getProblem().getId())
-                .stream()
+        List<ProblemTestcase> executableTestcases = problemTestcaseRepository
+                .findAllByProblem_IdOrderByTestcaseOrderAsc(submission.getProblem().getId());
+        int hiddenTestcaseCount = (int) executableTestcases.stream()
+                .filter(ProblemTestcase::isHidden)
+                .count();
+        List<HiddenTestCaseSnapshot> testcaseSnapshots = executableTestcases.stream()
                 .map(testcase -> new HiddenTestCaseSnapshot(
                         testcase.getId(),
                         testcase.getTestcaseOrder(),
@@ -62,7 +66,13 @@ public class JudgePersistenceService {
                 ))
                 .toList();
 
-        log.info("Submission {} changed from PENDING to JUDGING", submissionId);
+        log.info(
+                "Submission {} changed from PENDING to JUDGING problemId={} testcaseCount={} hiddenTestcaseCount={}",
+                submissionId,
+                submission.getProblem().getId(),
+                testcaseSnapshots.size(),
+                hiddenTestcaseCount
+        );
 
         return new StartedJudging(
                 submission.getId(),
@@ -71,7 +81,8 @@ public class JudgePersistenceService {
                 submission.getSourceCode(),
                 submission.getProblem().getTimeLimitMs(),
                 submission.getProblem().getMemoryLimitMb(),
-                hiddenTestCases
+                testcaseSnapshots,
+                hiddenTestcaseCount
         );
     }
 

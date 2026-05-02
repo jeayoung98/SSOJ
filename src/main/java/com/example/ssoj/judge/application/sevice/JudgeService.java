@@ -1,6 +1,5 @@
 package com.example.ssoj.judge.application.sevice;
 
-import com.example.ssoj.submission.domain.SubmissionResult;
 import com.example.ssoj.judge.application.port.ExecutionGateway;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
@@ -55,8 +54,26 @@ public class JudgeService {
         }
 
         if (startedJudging.hiddenTestCases().isEmpty()) {
-            log.info("Submission {} has no hidden test cases. Finishing with AC.", startedJudging.submissionId());
-            return new JudgeRunResult(SubmissionResult.AC, null, null);
+            log.error(
+                    "Submission {} cannot be judged because problem has no executable testcases. problemId={} testcaseCount={} hiddenTestcaseCount={} reason={}",
+                    startedJudging.submissionId(),
+                    startedJudging.problemId(),
+                    0,
+                    startedJudging.hiddenTestcaseCount(),
+                    "NO_EXECUTABLE_TESTCASES"
+            );
+            return JudgeRunResult.judgeError();
+        }
+
+        if (startedJudging.hiddenTestcaseCount() == 0) {
+            log.warn(
+                    "Submission {} will be judged with public testcases because no hidden testcases exist. problemId={} testcaseCount={} hiddenTestcaseCount={} reason={}",
+                    startedJudging.submissionId(),
+                    startedJudging.problemId(),
+                    startedJudging.hiddenTestCases().size(),
+                    startedJudging.hiddenTestcaseCount(),
+                    "PUBLIC_TESTCASES_ONLY"
+            );
         }
 
         return executionGateway.executeSubmission(new JudgeRunContext(

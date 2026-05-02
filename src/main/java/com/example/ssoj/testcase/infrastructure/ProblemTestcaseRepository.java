@@ -9,5 +9,7 @@ public interface ProblemTestcaseRepository extends JpaRepository<ProblemTestcase
 
     List<ProblemTestcase> findAllByProblem_Id(Long problemId);
 
+    List<ProblemTestcase> findAllByProblem_IdOrderByTestcaseOrderAsc(Long problemId);
+
     List<ProblemTestcase> findAllByProblem_IdAndHiddenTrueOrderByTestcaseOrderAsc(Long problemId);
 }

@@ -7,5 +7,6 @@ public enum SubmissionResult {
     RE,
     TLE,
     MLE,
+    JUDGE_ERROR,
     SYSTEM_ERROR
 }

@@ -63,7 +63,7 @@ class JudgeServiceTest {
     }
 
     @Test
-    void judge_returnsAcWithoutRunnerCallWhenThereAreNoHiddenCases() {
+    void judge_returnsJudgeErrorWithoutRunnerCallWhenThereAreNoTestcases() {
         JudgeService judgeService = new JudgeService(judgePersistenceService, executionGateway);
         when(judgePersistenceService.startJudging(11L)).thenReturn(startedJudging(List.of()));
         when(executionGateway.supports("python")).thenReturn(true);
@@ -73,7 +73,36 @@ class JudgeServiceTest {
         ArgumentCaptor<JudgeRunResult> resultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
         verify(executionGateway, never()).executeSubmission(any());
         verify(judgePersistenceService).saveResultsAndFinish(eq(11L), resultCaptor.capture(), any(Instant.class));
-        assertThat(resultCaptor.getValue()).isEqualTo(new JudgeRunResult(SubmissionResult.AC, null, null));
+        assertThat(resultCaptor.getValue()).isEqualTo(JudgeRunResult.judgeError());
+    }
+
+    @Test
+    void judge_executesPublicTestcasesWhenHiddenCasesAreMissing() {
+        StartedJudging startedJudging = new StartedJudging(
+                10L,
+                20L,
+                "python",
+                "print(1)",
+                1000,
+                128,
+                List.of(new HiddenTestCaseSnapshot(1L, 1, "", "1\n")),
+                0
+        );
+        JudgeRunResult runnerResult = new JudgeRunResult(SubmissionResult.AC, 7, 128, null);
+        JudgeService judgeService = new JudgeService(judgePersistenceService, executionGateway);
+
+        when(judgePersistenceService.startJudging(13L)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.executeSubmission(any(JudgeRunContext.class))).thenReturn(runnerResult);
+
+        judgeService.judge(13L);
+
+        ArgumentCaptor<JudgeRunContext> contextCaptor = ArgumentCaptor.forClass(JudgeRunContext.class);
+        ArgumentCaptor<JudgeRunResult> resultCaptor = ArgumentCaptor.forClass(JudgeRunResult.class);
+        verify(executionGateway).executeSubmission(contextCaptor.capture());
+        verify(judgePersistenceService).saveResultsAndFinish(eq(13L), resultCaptor.capture(), any(Instant.class));
+        assertThat(contextCaptor.getValue().hiddenTestCases()).hasSize(1);
+        assertThat(resultCaptor.getValue()).isEqualTo(runnerResult);
     }
 
     @Test
