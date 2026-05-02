@@ -18,9 +18,14 @@ public class RunnerExecutionService {
     private static final Logger log = LoggerFactory.getLogger(RunnerExecutionService.class);
 
     private final RunnerLanguageExecutorSelector runnerLanguageExecutorSelector;
+    private final RunnerExecutionLimiter runnerExecutionLimiter;
 
-    public RunnerExecutionService(RunnerLanguageExecutorSelector runnerLanguageExecutorSelector) {
+    public RunnerExecutionService(
+            RunnerLanguageExecutorSelector runnerLanguageExecutorSelector,
+            RunnerExecutionLimiter runnerExecutionLimiter
+    ) {
         this.runnerLanguageExecutorSelector = runnerLanguageExecutorSelector;
+        this.runnerExecutionLimiter = runnerExecutionLimiter;
     }
 
     public RunnerExecutionResponse executeSubmission(RunnerExecutionRequest request) {
@@ -39,6 +44,14 @@ public class RunnerExecutionService {
                 request.memoryLimitMb()
         );
 
+        return runnerExecutionLimiter.executeWithLimit(request.submissionId(), () -> executeWithExecutor(request, executor, context));
+    }
+
+    private RunnerExecutionResponse executeWithExecutor(
+            RunnerExecutionRequest request,
+            LanguageExecutor executor,
+            JudgeRunContext context
+    ) {
         try {
             JudgeRunResult result = executor.executeSubmission(context);
             return RunnerExecutionResponse.from(result);
