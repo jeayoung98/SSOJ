@@ -91,11 +91,25 @@ public class Submission {
             Integer failedTestcaseOrder,
             Instant judgedAt
     ) {
+        updateJudgedResult(result, executionTimeMs, memoryKb, failedTestcaseOrder, judgedAt);
+    }
+
+    public void updateJudgedResult(
+            SubmissionResult result,
+            Integer executionTimeMs,
+            Integer memoryKb,
+            Integer failedTestcaseOrder,
+            Instant judgedAt
+    ) {
         this.status = SubmissionStatus.DONE;
         this.result = result;
-        this.executionTimeMs = executionTimeMs;
-        this.memoryKb = memoryKb;
-        this.failedTestcaseOrder = failedTestcaseOrder;
+        if (executionTimeMs != null || this.executionTimeMs == null) {
+            this.executionTimeMs = executionTimeMs;
+        }
+        if (memoryKb != null || this.memoryKb == null) {
+            this.memoryKb = memoryKb;
+        }
+        this.failedTestcaseOrder = result == SubmissionResult.AC ? null : failedTestcaseOrder;
         this.judgedAt = judgedAt;
     }
 }

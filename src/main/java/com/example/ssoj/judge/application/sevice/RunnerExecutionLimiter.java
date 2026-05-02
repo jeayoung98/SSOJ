@@ -3,6 +3,7 @@ package com.example.ssoj.judge.application.sevice;
 import com.example.ssoj.judge.infrastructure.config.RunnerExecutionProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -17,12 +18,19 @@ import java.util.function.Supplier;
 public class RunnerExecutionLimiter {
 
     private static final Logger log = LoggerFactory.getLogger(RunnerExecutionLimiter.class);
-    private static final long ACQUIRE_TIMEOUT_SECONDS = 3;
+    private static final long ACQUIRE_TIMEOUT_SECONDS = 30;
 
     private final Semaphore semaphore;
+    private final long acquireTimeoutSeconds;
 
+    @Autowired
     public RunnerExecutionLimiter(RunnerExecutionProperties properties) {
+        this(properties, ACQUIRE_TIMEOUT_SECONDS);
+    }
+
+    public RunnerExecutionLimiter(RunnerExecutionProperties properties, long acquireTimeoutSeconds) {
         this.semaphore = new Semaphore(properties.maxConcurrentExecutions(), true);
+        this.acquireTimeoutSeconds = acquireTimeoutSeconds;
     }
 
     public <T> T executeWithLimit(Long submissionId, Supplier<T> execution) {
@@ -33,8 +41,14 @@ public class RunnerExecutionLimiter {
                     submissionId,
                     semaphore.availablePermits()
             );
-            acquired = semaphore.tryAcquire(ACQUIRE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            acquired = semaphore.tryAcquire(acquireTimeoutSeconds, TimeUnit.SECONDS);
             if (!acquired) {
+                log.warn(
+                        "Runner execution slot unavailable after timeout submissionId={} timeoutSeconds={} availablePermits={}",
+                        submissionId,
+                        acquireTimeoutSeconds,
+                        semaphore.availablePermits()
+                );
                 throw new RunnerBusyException("Runner is busy. Please retry later.");
             }
             log.info(

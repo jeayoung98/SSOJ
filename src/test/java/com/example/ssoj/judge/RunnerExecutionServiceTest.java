@@ -87,6 +87,25 @@ class RunnerExecutionServiceTest {
     }
 
     @Test
+    void executeSubmission_preventsAcceptedExecutedResultWithoutMetrics() {
+        RecordingLanguageExecutor executor = new RecordingLanguageExecutor(
+                "python",
+                new JudgeRunResult(SubmissionResult.AC, null, null, null)
+        );
+        RunnerExecutionService service = new RunnerExecutionService(
+                new RunnerLanguageExecutorSelector(List.of(executor)),
+                limiter(4)
+        );
+
+        RunnerExecutionResponse response = service.executeSubmission(request("python"));
+
+        assertThat(response.result()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
+        assertThat(response.executionTimeMs()).isNull();
+        assertThat(response.memoryUsageKb()).isNull();
+        assertThat(response.failedTestcaseOrder()).isNull();
+    }
+
+    @Test
     void executeSubmission_releasesPermitWhenExecutorThrows() {
         RunnerExecutionService service = new RunnerExecutionService(
                 new RunnerLanguageExecutorSelector(List.of(new ThrowingLanguageExecutor("cpp"))),
@@ -143,7 +162,7 @@ class RunnerExecutionServiceTest {
     }
 
     private RunnerExecutionLimiter limiter(int maxConcurrentExecutions) {
-        return new RunnerExecutionLimiter(new RunnerExecutionProperties(maxConcurrentExecutions));
+        return new RunnerExecutionLimiter(new RunnerExecutionProperties(maxConcurrentExecutions), 1);
     }
 
     private static final class RecordingLanguageExecutor implements LanguageExecutor {

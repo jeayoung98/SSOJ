@@ -83,7 +83,15 @@ public class JudgePersistenceService {
             return;
         }
 
-        submission.finish(
+        log.info(
+                "Updating submission judged result submissionId={} result={} executionTimeMs={} memoryKb={} failedTestcaseOrder={}",
+                submissionId,
+                runResult.finalResult(),
+                runResult.executionTimeMs(),
+                runResult.memoryKb(),
+                runResult.failedTestcaseOrder()
+        );
+        submission.updateJudgedResult(
                 runResult.finalResult(),
                 runResult.executionTimeMs(),
                 runResult.memoryKb(),

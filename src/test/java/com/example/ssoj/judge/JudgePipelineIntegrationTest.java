@@ -96,6 +96,25 @@ class JudgePipelineIntegrationTest {
         assertThat(fakeLanguageExecutor.executeSubmissionCount()).isEqualTo(1);
     }
 
+    @Test
+    void consume_persistsAcceptedResultMetrics() throws InterruptedException {
+        Problem problem = problemRepository.save(problem(1000, 128));
+        User user = userRepository.save(user());
+        testCaseRepository.save(testCase(problem, 1, "1 2", "3\n", true));
+
+        Submission submission = submissionRepository.save(submission(user, problem, "fake", "print()", SubmissionStatus.PENDING));
+        fakeLanguageExecutor.setResult(new JudgeRunResult(SubmissionResult.AC, 11, 128, null));
+
+        when(listOperations.leftPop(QUEUE_KEY)).thenReturn(submission.getId().toString());
+        judgeQueueConsumer.consume();
+
+        Submission finishedSubmission = awaitSubmission(submission.getId(), SubmissionResult.AC, Duration.ofSeconds(5));
+
+        assertThat(finishedSubmission.getFailedTestcaseOrder()).isNull();
+        assertThat(finishedSubmission.getExecutionTimeMs()).isEqualTo(11);
+        assertThat(finishedSubmission.getMemoryKb()).isEqualTo(128);
+    }
+
     private Submission awaitSubmission(Long submissionId, SubmissionResult expectedResult, Duration timeout) throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
