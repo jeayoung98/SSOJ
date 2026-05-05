@@ -22,17 +22,23 @@ public class JavaExecutor implements LanguageExecutor {
 
     private final String dockerImage;
     private final long compileTimeoutMs;
+    private final String compileCommand;
+    private final String jvmOptions;
     private final DockerProcessExecutor dockerProcessExecutor;
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public JavaExecutor(
             @Value("${worker.executor.java.image:ssoj-java-runner:17}") String dockerImage,
             @Value("${worker.executor.compile-timeout-ms:15000}") long compileTimeoutMs,
+            @Value("${worker.executor.java.compile-command:javac -J-XX:TieredStopAtLevel=1 Main.java}") String compileCommand,
+            @Value("${worker.executor.java.jvm-options:-XX:TieredStopAtLevel=1 -XX:+UseSerialGC}") String jvmOptions,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
         this.dockerImage = dockerImage;
         this.compileTimeoutMs = compileTimeoutMs;
+        this.compileCommand = compileCommand;
+        this.jvmOptions = jvmOptions;
         this.dockerProcessExecutor = dockerProcessExecutor;
         this.workspaceDirectoryFactory = workspaceDirectoryFactory;
     }
@@ -81,7 +87,13 @@ public class JavaExecutor implements LanguageExecutor {
     }
 
     private String buildRunCommand(JudgeContext context) {
-        return "java -Xmx" + context.memoryLimitMb() + "m Main";
+        // Tiered/JVM options are configurable so Java startup experiments do not change judge semantics.
+        String trimmedJvmOptions = jvmOptions == null ? "" : jvmOptions.trim();
+        String memoryOption = "-Xmx" + context.memoryLimitMb() + "m";
+        if (trimmedJvmOptions.isBlank()) {
+            return "java " + memoryOption + " Main";
+        }
+        return "java " + trimmedJvmOptions + " " + memoryOption + " Main";
     }
 
     private JudgeRunResult executeHiddenTestCases(JudgeRunContext context, Path workspaceDirectory, int dockerMemoryMb)
@@ -100,7 +112,7 @@ public class JavaExecutor implements LanguageExecutor {
                 workspaceDirectory,
                 dockerImage,
                 dockerMemoryMb,
-                "javac Main.java",
+                compileCommand,
                 compileTimeoutMs,
                 runCommand
         );

@@ -30,7 +30,12 @@ class PythonExecutorTest {
                         new JudgeRunResult(SubmissionResult.AC, 35, 512, null)
                 )
         );
-        PythonExecutor pythonExecutor = new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+        PythonExecutor pythonExecutor = new PythonExecutor(
+                "ssoj-python-runner:3.11",
+                "python3 main.py",
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
+        );
 
         JudgeRunResult result = pythonExecutor.executeSubmission(context());
 
@@ -51,7 +56,12 @@ class PythonExecutorTest {
                         new JudgeRunResult(SubmissionResult.WA, 40, 700, 2)
                 )
         );
-        PythonExecutor pythonExecutor = new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory);
+        PythonExecutor pythonExecutor = new PythonExecutor(
+                "ssoj-python-runner:3.11",
+                "python3 main.py",
+                dockerProcessExecutor,
+                workspaceDirectoryFactory
+        );
 
         JudgeRunResult result = pythonExecutor.executeSubmission(context());
 

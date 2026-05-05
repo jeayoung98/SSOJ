@@ -33,6 +33,8 @@ class JavaExecutorTest {
         JavaExecutor javaExecutor = new JavaExecutor(
                 "ssoj-java-runner:17",
                 15000L,
+                "javac -J-XX:TieredStopAtLevel=1 Main.java",
+                "-XX:TieredStopAtLevel=1 -XX:+UseSerialGC",
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
         );
@@ -44,8 +46,8 @@ class JavaExecutorTest {
         assertThat(result.memoryKb()).isEqualTo(512);
         assertThat(dockerProcessExecutor.batchCallCount).isEqualTo(1);
         assertThat(dockerProcessExecutor.dockerImage).isEqualTo("ssoj-java-runner:17");
-        assertThat(dockerProcessExecutor.compileCommand).isEqualTo("javac Main.java");
-        assertThat(dockerProcessExecutor.runCommand).isEqualTo("java -Xmx128m Main");
+        assertThat(dockerProcessExecutor.compileCommand).isEqualTo("javac -J-XX:TieredStopAtLevel=1 Main.java");
+        assertThat(dockerProcessExecutor.runCommand).isEqualTo("java -XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xmx128m Main");
         assertThat(dockerProcessExecutor.dockerMemoryMb).isEqualTo(256);
         assertThat(Files.exists(dockerProcessExecutor.workspaceDirectory)).isFalse();
     }
@@ -60,6 +62,8 @@ class JavaExecutorTest {
         JavaExecutor javaExecutor = new JavaExecutor(
                 "ssoj-java-runner:17",
                 15000L,
+                "javac -J-XX:TieredStopAtLevel=1 Main.java",
+                "-XX:TieredStopAtLevel=1 -XX:+UseSerialGC",
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
         );
@@ -81,6 +85,8 @@ class JavaExecutorTest {
         JavaExecutor javaExecutor = new JavaExecutor(
                 "ssoj-java-runner:17",
                 15000L,
+                "javac -J-XX:TieredStopAtLevel=1 Main.java",
+                "-XX:TieredStopAtLevel=1 -XX:+UseSerialGC",
                 dockerProcessExecutor,
                 workspaceDirectoryFactory
         );

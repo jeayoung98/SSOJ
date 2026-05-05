@@ -28,15 +28,21 @@ class RealLanguageExecutorTest {
     void javaCppPython_executeMultipleHiddenCasesWithSingleSubmission() {
         assertAc(new CppExecutor("ssoj-cpp-runner:13", COMPILE_TIMEOUT_MS, "g++ main.cpp -O2 -std=c++17 -o main", "./main", dockerProcessExecutor, workspaceDirectoryFactory)
                 .executeSubmission(cppContext()));
-        assertAc(new JavaExecutor("ssoj-java-runner:17", COMPILE_TIMEOUT_MS, dockerProcessExecutor, workspaceDirectoryFactory)
+        assertAc(new JavaExecutor(
+                "ssoj-java-runner:17",
+                COMPILE_TIMEOUT_MS,
+                "javac -J-XX:TieredStopAtLevel=1 Main.java",
+                "-XX:TieredStopAtLevel=1 -XX:+UseSerialGC",
+                dockerProcessExecutor,
+                workspaceDirectoryFactory)
                 .executeSubmission(javaContext()));
-        assertAc(new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory)
+        assertAc(new PythonExecutor("ssoj-python-runner:3.11", "python3 main.py", dockerProcessExecutor, workspaceDirectoryFactory)
                 .executeSubmission(pythonContext()));
     }
 
     @Test
     void pythonExecutor_returnsTleWhenOneTestCaseExceedsLimit() {
-        JudgeRunResult result = new PythonExecutor("ssoj-python-runner:3.11", dockerProcessExecutor, workspaceDirectoryFactory)
+        JudgeRunResult result = new PythonExecutor("ssoj-python-runner:3.11", "python3 main.py", dockerProcessExecutor, workspaceDirectoryFactory)
                 .executeSubmission(new JudgeRunContext(
                         1004L,
                         2004L,

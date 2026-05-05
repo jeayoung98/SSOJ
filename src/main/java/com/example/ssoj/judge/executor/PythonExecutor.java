@@ -20,15 +20,18 @@ public class PythonExecutor implements LanguageExecutor {
     private static final int MIN_DOCKER_MEMORY_MB = 128;
 
     private final String dockerImage;
+    private final String runCommand;
     private final DockerProcessExecutor dockerProcessExecutor;
     private final WorkspaceDirectoryFactory workspaceDirectoryFactory;
 
     public PythonExecutor(
             @Value("${worker.executor.python.image:ssoj-python-runner:3.11}") String dockerImage,
+            @Value("${worker.executor.python.run-command:python3 main.py}") String runCommand,
             DockerProcessExecutor dockerProcessExecutor,
             WorkspaceDirectoryFactory workspaceDirectoryFactory
     ) {
         this.dockerImage = dockerImage;
+        this.runCommand = runCommand;
         this.dockerProcessExecutor = dockerProcessExecutor;
         this.workspaceDirectoryFactory = workspaceDirectoryFactory;
     }
@@ -81,7 +84,7 @@ public class PythonExecutor implements LanguageExecutor {
                 dockerMemoryMb,
                 null,
                 null,
-                "python3 main.py"
+                runCommand
         );
     }
 

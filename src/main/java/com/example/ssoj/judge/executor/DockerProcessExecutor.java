@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
+import java.util.Properties;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.regex.Matcher;
@@ -38,6 +39,7 @@ public class DockerProcessExecutor {
     private static final Pattern MEMORY_PATTERN = Pattern.compile(
             "Maximum resident set size \\(kbytes\\):\\s*(\\d+)"
     );
+    private static final String BATCH_METRICS_FILE_NAME = "batch_metrics.properties";
 
     public JudgeExecutionResult executeCompile(
             JudgeContext context,
@@ -133,11 +135,17 @@ public class DockerProcessExecutor {
             Long compileTimeoutMs,
             String runCommand
     ) throws IOException, InterruptedException {
+        long batchStartedAt = System.nanoTime();
+        CommandResult dockerResult = null;
+        JudgeRunResult finalRunResult = null;
+        BatchScriptMetrics scriptMetrics = BatchScriptMetrics.empty();
         writeBatchTestCaseFiles(context, workspaceDirectory);
 
         Path resultFile = workspaceDirectory.resolve("result.json");
+        Path metricsFile = workspaceDirectory.resolve(BATCH_METRICS_FILE_NAME);
         Path scriptFile = workspaceDirectory.resolve("run_all.sh");
         Files.deleteIfExists(resultFile);
+        Files.deleteIfExists(metricsFile);
         Files.writeString(
                 scriptFile,
                 buildRunAllScript(context, compileCommand, compileTimeoutMs, runCommand),
@@ -145,7 +153,7 @@ public class DockerProcessExecutor {
         );
 
         long waitTimeoutMs = resolveBatchWaitTimeoutMs(context, compileTimeoutMs);
-        CommandResult result = runInContainer(
+        dockerResult = runInContainer(
                 new JudgeContext(
                         context.submissionId(),
                         context.problemId(),
@@ -162,46 +170,61 @@ public class DockerProcessExecutor {
                 waitTimeoutMs,
                 null
         );
+        scriptMetrics = readBatchScriptMetrics(context.submissionId(), metricsFile);
 
-        if (result.systemError()) {
-            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
-            return JudgeRunResult.systemError();
+        if (dockerResult.systemError()) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
+            finalRunResult = JudgeRunResult.systemError();
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
 
-        if (result.exitCode() == null || result.exitCode() != 0) {
-            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
-            return JudgeRunResult.systemError();
+        if (dockerResult.exitCode() == null || dockerResult.exitCode() != 0) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
+            finalRunResult = JudgeRunResult.systemError();
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
 
         if (!Files.exists(resultFile)) {
-            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
-            return JudgeRunResult.systemError();
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
+            finalRunResult = JudgeRunResult.systemError();
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
 
         BatchResult batchResult;
         try {
             batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
         } catch (Exception exception) {
-            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
             log.error("Failed to parse batch result.json for submission {}", context.submissionId(), exception);
-            return JudgeRunResult.systemError();
+            finalRunResult = JudgeRunResult.systemError();
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
         if (batchResult.result() == null) {
-            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
-            return JudgeRunResult.systemError();
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
+            finalRunResult = JudgeRunResult.systemError();
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
 
         JudgeRunResult outputComparisonResult = compareBatchOutputs(context, workspaceDirectory, batchResult);
         if (outputComparisonResult != null) {
-            return outputComparisonResult;
+            finalRunResult = outputComparisonResult;
+            logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+            return finalRunResult;
         }
 
-        return new JudgeRunResult(
+        finalRunResult = new JudgeRunResult(
                 batchResult.result(),
                 batchResult.executionTimeMs(),
                 batchResult.memoryUsageKb(),
                 batchResult.failedTestcaseOrder()
         );
+        logBatchSummary(context, dockerImage, dockerMemoryMb, batchStartedAt, dockerResult, scriptMetrics, finalRunResult);
+        return finalRunResult;
     }
 
     private CommandResult runInContainer(
@@ -238,6 +261,7 @@ public class DockerProcessExecutor {
         );
 
         Process process = null;
+        long processStartedAt = System.nanoTime();
         try {
             log.info(
                     "Starting Docker execution for submission {} with image={} command={}",
@@ -257,28 +281,31 @@ public class DockerProcessExecutor {
 
             if (!finished) {
                 process.destroyForcibly();
+                long processElapsedMs = elapsedMillis(processStartedAt);
                 log.info(
                         "Docker client process timed out for submission {} after {} ms with image={}",
                         context.submissionId(),
                         waitTimeoutMs,
                         dockerImage
                 );
-                return new CommandResult("", "Docker client process timed out", null, true);
+                return new CommandResult("", "Docker client process timed out", null, true, processElapsedMs);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             int exitCode = process.exitValue();
+            long processElapsedMs = elapsedMillis(processStartedAt);
 
             log.info(
-                    "Docker execution finished for submission {} with image={} exitCode={} memoryLimit={}m cpuLimit={}",
+                    "Docker execution finished for submission {} with image={} exitCode={} memoryLimit={}m cpuLimit={} dockerRunElapsedMs={}",
                     context.submissionId(),
                     dockerImage,
                     exitCode,
                     dockerMemoryMb,
-                    CPU_LIMIT
+                    CPU_LIMIT,
+                    processElapsedMs
             );
-            return new CommandResult(stdout, stderr, exitCode, false);
+            return new CommandResult(stdout, stderr, exitCode, false, processElapsedMs);
         } catch (IOException exception) {
             log.warn(
                     "Failed to start Docker for submission {} with image={} command={}",
@@ -338,8 +365,13 @@ public class DockerProcessExecutor {
         String compileBlock = "";
         if (compileCommand != null && !compileCommand.isBlank()) {
             compileBlock = """
+                    # Measures javac/g++ elapsed time inside the already-started batch container.
+                    compile_started_at="$(now_ms)"
                     timeout "$COMPILE_TIMEOUT_SECONDS"s /usr/bin/bash -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
                     compile_exit=$?
+                    compile_finished_at="$(now_ms)"
+                    compile_time_ms=$((compile_finished_at - compile_started_at))
+                    write_metrics
                     if [ "$compile_exit" -ne 0 ]; then
                       write_result CE "" "" "" ""
                       exit 0
@@ -360,6 +392,8 @@ public class DockerProcessExecutor {
                 RUN_COMMAND=%s
                 max_time=""
                 max_mem=""
+                compile_time_ms=""
+                test_execution_total_time_ms=0
 
                 json_number_or_null() {
                   if [ -z "$1" ]; then
@@ -392,6 +426,20 @@ public class DockerProcessExecutor {
                   if [ -n "$mem_value" ] && { [ -z "$max_mem" ] || [ "$mem_value" -gt "$max_mem" ]; }; then
                     max_mem="$mem_value"
                   fi
+                }
+
+                # These metrics separate Docker/container overhead from compile and testcase runtime.
+                write_metrics() {
+                  {
+                    printf 'compileTimeMs=%%s\\n' "$compile_time_ms"
+                    printf 'testExecutionTotalTimeMs=%%s\\n' "$test_execution_total_time_ms"
+                    printf 'maxSingleTestExecutionTimeMs=%%s\\n' "$max_time"
+                    printf 'maxMemoryUsageKb=%%s\\n' "$max_mem"
+                  } > %s
+                }
+
+                now_ms() {
+                  date +%%s%%3N
                 }
 
                 elapsed_to_ms() {
@@ -437,6 +485,10 @@ public class DockerProcessExecutor {
                     parsed_time=%d
                   fi
                   update_max "$parsed_time" "$parsed_mem"
+                  if [ -n "$parsed_time" ]; then
+                    test_execution_total_time_ms=$((test_execution_total_time_ms + parsed_time))
+                  fi
+                  write_metrics
 
                   if [ "$run_exit" -eq 124 ]; then
                     write_result TLE "$order" "$max_time" "$max_mem" "$i"
@@ -458,6 +510,7 @@ public class DockerProcessExecutor {
                   i=$((i + 1))
                 done
 
+                write_metrics
                 write_result AC "" "$max_time" "$max_mem" ""
                 exit 0
                 """.formatted(
@@ -467,6 +520,7 @@ public class DockerProcessExecutor {
                 toTimeoutSeconds(compileTimeoutMs == null ? 0 : compileTimeoutMs.intValue()),
                 shellSingleQuote(compileCommand == null ? "" : compileCommand),
                 shellSingleQuote(runCommand),
+                BATCH_METRICS_FILE_NAME,
                 compileBlock,
                 context.timeLimitMs() == null ? 0 : context.timeLimitMs()
         );
@@ -476,6 +530,78 @@ public class DockerProcessExecutor {
         long perCaseTimeoutMs = (context.timeLimitMs() == null ? 0L : context.timeLimitMs()) + COMMAND_TIMEOUT_BUFFER_MS;
         long compileMs = compileTimeoutMs == null ? 0L : compileTimeoutMs;
         return compileMs + (perCaseTimeoutMs * context.hiddenTestCases().size()) + COMMAND_TIMEOUT_BUFFER_MS;
+    }
+
+    private BatchScriptMetrics readBatchScriptMetrics(Long submissionId, Path metricsFile) {
+        if (!Files.exists(metricsFile)) {
+            log.warn("Batch metrics file is missing for submission {}: {}", submissionId, metricsFile);
+            return BatchScriptMetrics.empty();
+        }
+
+        try (var inputStream = Files.newInputStream(metricsFile)) {
+            Properties properties = new Properties();
+            properties.load(inputStream);
+            return new BatchScriptMetrics(
+                    parseNullableLong(properties.getProperty("compileTimeMs")),
+                    parseNullableLong(properties.getProperty("testExecutionTotalTimeMs")),
+                    parseNullableLong(properties.getProperty("maxSingleTestExecutionTimeMs")),
+                    parseNullableLong(properties.getProperty("maxMemoryUsageKb"))
+            );
+        } catch (Exception exception) {
+            log.warn("Failed to parse batch metrics file for submission {}: {}", submissionId, metricsFile, exception);
+            return BatchScriptMetrics.empty();
+        }
+    }
+
+    private Long parseNullableLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        return Long.parseLong(value.trim());
+    }
+
+    private void logBatchSummary(
+            JudgeRunContext context,
+            String dockerImage,
+            int dockerMemoryMb,
+            long batchStartedAt,
+            CommandResult dockerResult,
+            BatchScriptMetrics scriptMetrics,
+            JudgeRunResult finalRunResult
+    ) {
+        try {
+            log.info(
+                    "Judge batch summary. submissionId={} problemId={} language={} dockerImage={} dockerMemoryMb={} testCount={} totalBatchElapsedMs={} dockerRunElapsedMs={} compileTimeMs={} testExecutionTotalTimeMs={} maxSingleTestExecutionTimeMs={} maxMemoryUsageKb={} finalResult={} failedTestcaseOrder={}",
+                    context.submissionId(),
+                    context.problemId(),
+                    context.language(),
+                    dockerImage,
+                    dockerMemoryMb,
+                    context.hiddenTestCases().size(),
+                    elapsedMillis(batchStartedAt),
+                    dockerResult == null ? null : dockerResult.processElapsedMs(),
+                    scriptMetrics.compileTimeMs(),
+                    scriptMetrics.testExecutionTotalTimeMs(),
+                    firstNonNull(scriptMetrics.maxSingleTestExecutionTimeMs(), finalRunResult.executionTimeMs()),
+                    firstNonNull(scriptMetrics.maxMemoryUsageKb(), finalRunResult.memoryKb()),
+                    finalRunResult.finalResult(),
+                    finalRunResult.failedTestcaseOrder()
+            );
+        } catch (Exception exception) {
+            log.warn("Failed to write judge batch summary for submission {}", context.submissionId(), exception);
+        }
+    }
+
+    private Long firstNonNull(Long first, Integer second) {
+        if (first != null) {
+            return first;
+        }
+        return second == null ? null : second.longValue();
+    }
+
+    private long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 
     private String shellSingleQuote(String value) {
@@ -823,7 +949,8 @@ public class DockerProcessExecutor {
             String stdout,
             String stderr,
             Integer exitCode,
-            boolean systemError
+            boolean systemError,
+            Long processElapsedMs
     ) {
     }
 
@@ -840,5 +967,16 @@ public class DockerProcessExecutor {
             Integer failedTestcaseOrder,
             Integer failedFileIndex
     ) {
+    }
+
+    private record BatchScriptMetrics(
+            Long compileTimeMs,
+            Long testExecutionTotalTimeMs,
+            Long maxSingleTestExecutionTimeMs,
+            Long maxMemoryUsageKb
+    ) {
+        private static BatchScriptMetrics empty() {
+            return new BatchScriptMetrics(null, null, null, null);
+        }
     }
 }
