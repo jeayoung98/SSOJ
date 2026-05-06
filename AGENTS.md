@@ -1,128 +1,143 @@
 # AGENTS.md
 
 ## Project overview
-This project is an online judge platform.
 
-- Next.js handles web pages and API routes.
-- Spring Boot handles judge worker logic.
-- PostgreSQL stores problems, test cases, submissions, and judge results.
-- Redis is used as the queue between Next.js and the judge worker.
-- Docker is used to compile and run untrusted user code in isolation.
+SSOJ is an online judge backend for running C++ / Java / Python submissions in Docker sandbox containers.
+
+This repository focuses on the Spring Boot judging backend:
+
+- Cloud Run Orchestrator
+- GCE Runner VM application
+- Docker-based code execution
+- Judge result persistence
+- SSE progress delivery from Orchestrator
+
+Next.js Web/API and Supabase infrastructure are part of the full service, but their implementation is outside this repository.
 
 ## Current architecture
-- Web/API: Next.js
-- Judge worker: Spring Boot
-- Queue: Redis List
-- DB: PostgreSQL
-- Sandbox: Docker
 
-## Scope for this phase
-This is a 3-day MVP.
-Focus only on the minimum working judging pipeline.
+```text
+Frontend / Next.js
+-> Supabase DB
+-> Cloud Run Orchestrator
+-> Compute Engine Runner VM
+-> Docker Sandbox Containers
+```
 
-Include:
-- problem list/detail
-- code submission
-- async judging
-- submission status/result
-- submission history
-- admin problem/testcase registration
-- C++, Java, Python judging
+## Important contracts
 
-Exclude:
-- ranking
-- plagiarism check
-- multi-region deployment
-- advanced sandbox hardening
-- autoscaling
-- SSE/realtime push
+### Submission-first contract
 
-## Queue contract
-- Redis key: `judge:queue`
-- Payload: `submissionId`
-- Next.js saves submission first, then pushes `submissionId` into Redis.
-- Spring worker reads from Redis and performs judging.
+Next.js must create a `submissions` row before triggering judging.
 
-## Submission status enum
-- PENDING
-- JUDGING
-- AC
-- WA
-- CE
-- RE
-- TLE
-- MLE
-- SYSTEM_ERROR
+The judging pipeline uses `submissionId`, not `problemId`, as the job identifier.
 
-## Core DB model
-### Submission
-- id: Long
-- problemId: Long
-- language: String
-- sourceCode: Text
-- status: Enum
-- createdAt
-- startedAt
-- finishedAt
+### Judge trigger
 
-### Problem
-- id: Long
-- title
-- description
-- timeLimitMs
-- memoryLimitMb
+```http
+POST /internal/judge-executions
+Content-Type: application/json
+```
 
-### TestCase
-- id: Long
-- problemId: Long
-- input
-- output
-- isHidden
+```json
+{
+  "submissionId": 222
+}
+```
 
-### SubmissionCaseResult
-- id: Long
-- submissionId: Long
-- testCaseId: Long
-- status
-- executionTimeMs
-- memoryUsageKb
+A successful trigger returns `202 Accepted` with an empty body.
 
-## Judging policy
-- Submission API must return quickly after enqueue.
-- The worker must do actual judging asynchronously.
-- Initial judging concurrency: 2
-- Use Docker with:
-    - no network
-    - memory limit
-    - cpu limit
-    - timeout
-- Clean up containers and temp files after execution.
+### Runner contract
 
-## Language policy
-### C++
-- source file: main.cpp
-- compile: g++ main.cpp -O2 -std=c++17 -o main
-- run: ./main
+The frontend must not call Runner directly.
 
-### Java
-- source file: Main.java
-- compile: javac Main.java
-- run: java Main
-- assume user class name is Main for MVP
+Allowed:
 
-### Python
-- source file: main.py
-- run: python3 main.py
+```text
+Frontend / Next.js -> Orchestrator -> Runner VM
+```
 
-## Output comparison
-- MVP policy: trim and compare line-by-line
-- ignore trailing newline differences
-- do not implement special judge
+Not allowed:
 
-## Engineering rules
-- Do not add Controller/Security/Swagger to the Spring worker
-- Do not over-engineer
-- Prefer simple, runnable code
-- Keep changes minimal and scoped
-- Before writing code, explain which files will be created/modified
-- After coding, explain how to run and verify
+```text
+Frontend / Next.js -> Runner VM
+```
+
+### Progress contract
+
+Runner sends progress callbacks to Orchestrator.
+
+Orchestrator forwards progress to frontend clients over SSE.
+
+`completedTestcases` means executed testcase count. It does not mean passed testcase count.
+
+Correct UI wording:
+
+```text
+테스트 실행 중... 37 / 100
+```
+
+Incorrect UI wording:
+
+```text
+37개 통과
+```
+
+## Result model
+
+Final judge result is stored in `submissions`.
+
+Do not introduce testcase-level result persistence unless explicitly requested.
+
+Important fields:
+
+- `status`: `PENDING`, `JUDGING`, `DONE`
+- `result`: `AC`, `WA`, `CE`, `RE`, `TLE`, `MLE`, `SYSTEM_ERROR`
+- `execution_time_ms`
+- `memory_kb`
+- `failed_testcase_order`
+- `submitted_at`
+- `judged_at`
+
+## Execution model
+
+The current execution model is `PER_CASE_PROCESS`.
+
+This means:
+
+- C++ is compiled once and executed once per testcase.
+- Java is compiled once and executed once per testcase.
+- Python is executed once per testcase.
+
+This is slower than batched stdin execution, but it prevents testcase-to-testcase state contamination.
+
+## Warm container model
+
+Runner can use a Warm Container Pool.
+
+Expected behavior:
+
+- Language containers are created ahead of time.
+- Runner uses `docker exec` for each judging job.
+- Container recreation is a fallback path, not the normal path.
+
+## SSE reliability model
+
+The current SSE hub is memory-based.
+
+This is acceptable for MVP usage when Cloud Run is constrained to a single instance.
+
+Do not assume memory-based SSE is reliable under multi-instance Cloud Run scale-out.
+
+If scale-out is required, introduce Redis Pub/Sub or another external broker.
+
+## Documentation rules
+
+When updating documentation:
+
+- Do not document Cloud Tasks as the active production path unless the code and deployment actually use it.
+- Do not document Redis as the production queue unless it is actually in the active deployment path.
+- Do not expose real Cloud Run URLs, VM external IPs, DB URLs, service account emails, or secrets in public docs.
+- Use placeholders for environment-specific values.
+- Keep README focused on the current architecture.
+- Keep old architecture notes out of active docs.
