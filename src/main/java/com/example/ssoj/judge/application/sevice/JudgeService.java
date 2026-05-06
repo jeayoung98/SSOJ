@@ -1,9 +1,11 @@
 package com.example.ssoj.judge.application.sevice;
 
 import com.example.ssoj.judge.application.port.ExecutionGateway;
+import com.example.ssoj.judge.domain.model.JudgeProgressEvent;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.domain.model.StartedJudging;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,13 +20,24 @@ public class JudgeService {
 
     private final JudgePersistenceService judgePersistenceService;
     private final ExecutionGateway executionGateway;
+    private final SubmissionProgressHub submissionProgressHub;
 
     public JudgeService(
             JudgePersistenceService judgePersistenceService,
             ExecutionGateway executionGateway
     ) {
+        this(judgePersistenceService, executionGateway, null);
+    }
+
+    @Autowired
+    public JudgeService(
+            JudgePersistenceService judgePersistenceService,
+            ExecutionGateway executionGateway,
+            SubmissionProgressHub submissionProgressHub
+    ) {
         this.judgePersistenceService = judgePersistenceService;
         this.executionGateway = executionGateway;
+        this.submissionProgressHub = submissionProgressHub;
     }
 
     public void judge(Long submissionId) {
@@ -44,7 +57,32 @@ public class JudgeService {
                     runResult,
                     Instant.now()
             );
+            publishDoneProgress(startedJudging, runResult);
         }
+    }
+
+    private void publishDoneProgress(StartedJudging startedJudging, JudgeRunResult runResult) {
+        if (submissionProgressHub == null) {
+            return;
+        }
+
+        try {
+            submissionProgressHub.publish(JudgeProgressEvent.done(
+                    startedJudging.submissionId(),
+                    startedJudging.hiddenTestCases().size(),
+                    progressResult(runResult)
+            ));
+            submissionProgressHub.complete(startedJudging.submissionId());
+        } catch (Exception exception) {
+            log.warn("DONE progress emit failed submissionId={}", startedJudging.submissionId(), exception);
+        }
+    }
+
+    private String progressResult(JudgeRunResult runResult) {
+        if (runResult.finalResult().name().equals("JUDGE_ERROR")) {
+            return "SYSTEM_ERROR";
+        }
+        return runResult.finalResult().name();
     }
 
     JudgeRunResult runJudgeLogic(StartedJudging startedJudging) {

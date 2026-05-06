@@ -1,12 +1,15 @@
 package com.example.ssoj.judge.executor;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.ssoj.judge.application.port.JudgeProgressPublisher;
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
 import com.example.ssoj.judge.domain.model.JudgeContext;
 import com.example.ssoj.judge.domain.model.JudgeExecutionResult;
+import com.example.ssoj.judge.domain.model.JudgeProgressEvent;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
+import com.example.ssoj.judge.infrastructure.progress.NoopJudgeProgressPublisher;
 import com.example.ssoj.submission.domain.SubmissionResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,12 +17,16 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.regex.Matcher;
@@ -32,7 +39,6 @@ public class DockerProcessExecutor {
     private static final Logger log = LoggerFactory.getLogger(DockerProcessExecutor.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final String CPU_LIMIT = "1";
-    private static final String PIDS_LIMIT = "128";
     private static final long COMMAND_TIMEOUT_BUFFER_MS = 5000L;
     private static final Pattern ELAPSED_TIME_PATTERN = Pattern.compile(
             "Elapsed \\(wall clock\\) time \\(h:mm:ss or m:ss\\):\\s*(.+)"
@@ -40,15 +46,16 @@ public class DockerProcessExecutor {
     private static final Pattern MEMORY_PATTERN = Pattern.compile(
             "Maximum resident set size \\(kbytes\\):\\s*(\\d+)"
     );
-    private static final String BATCH_METRICS_FILE_NAME = "batch_metrics.json";
-    private static final String EXECUTION_MODE_DOCKER_RUN = "docker-run";
-    private static final String EXECUTION_MODE_WARM_CONTAINER = "warm-container";
 
-    private WarmContainerManager warmContainerManager;
+    private final JudgeProgressPublisher judgeProgressPublisher;
 
-    @Autowired(required = false)
-    public void setWarmContainerManager(WarmContainerManager warmContainerManager) {
-        this.warmContainerManager = warmContainerManager;
+    public DockerProcessExecutor() {
+        this(new NoopJudgeProgressPublisher());
+    }
+
+    @Autowired
+    public DockerProcessExecutor(JudgeProgressPublisher judgeProgressPublisher) {
+        this.judgeProgressPublisher = judgeProgressPublisher;
     }
 
     public JudgeExecutionResult executeCompile(
@@ -145,14 +152,13 @@ public class DockerProcessExecutor {
             Long compileTimeoutMs,
             String runCommand
     ) throws IOException, InterruptedException {
-        long batchStartedAt = System.nanoTime();
         writeBatchTestCaseFiles(context, workspaceDirectory);
 
         Path resultFile = workspaceDirectory.resolve("result.json");
-        Path metricsFile = workspaceDirectory.resolve(BATCH_METRICS_FILE_NAME);
+        Path progressFile = workspaceDirectory.resolve("progress.jsonl");
         Path scriptFile = workspaceDirectory.resolve("run_all.sh");
         Files.deleteIfExists(resultFile);
-        Files.deleteIfExists(metricsFile);
+        Files.deleteIfExists(progressFile);
         Files.writeString(
                 scriptFile,
                 buildRunAllScript(context, compileCommand, compileTimeoutMs, runCommand),
@@ -160,44 +166,7 @@ public class DockerProcessExecutor {
         );
 
         long waitTimeoutMs = resolveBatchWaitTimeoutMs(context, compileTimeoutMs);
-        String batchCommand = "/usr/bin/bash /workspace/run_all.sh";
-        BatchExecutionResult executionResult = executeBatchCommand(
-                context,
-                workspaceDirectory,
-                dockerImage,
-                dockerMemoryMb,
-                batchCommand,
-                waitTimeoutMs,
-                resultFile,
-                metricsFile
-        );
-
-        return readAndCompareBatchResult(
-                context,
-                workspaceDirectory,
-                dockerImage,
-                dockerMemoryMb,
-                batchStartedAt,
-                executionResult,
-                batchCommand,
-                waitTimeoutMs,
-                resultFile,
-                metricsFile
-        );
-    }
-
-    private BatchExecutionResult executeBatchCommand(
-            JudgeRunContext context,
-            Path workspaceDirectory,
-            String dockerImage,
-            int dockerMemoryMb,
-            String batchCommand,
-            long waitTimeoutMs,
-            Path resultFile,
-            Path metricsFile
-    ) throws IOException, InterruptedException {
-        if (warmContainerManager == null || !warmContainerManager.enabled()) {
-            CommandResult dockerRunResult = runInContainer(
+        CommandResult result = runInContainer(
                 new JudgeContext(
                         context.submissionId(),
                         context.problemId(),
@@ -210,298 +179,50 @@ public class DockerProcessExecutor {
                 workspaceDirectory,
                 dockerImage,
                 dockerMemoryMb,
-                batchCommand,
+                "/usr/bin/bash /workspace/run_all.sh",
                 waitTimeoutMs,
-                null
-        );
-            return new BatchExecutionResult(
-                    dockerRunResult,
-                    EXECUTION_MODE_DOCKER_RUN,
-                    false,
-                    false,
-                    null,
-                    null,
-                    null,
-                    null
-            );
-        }
-
-        try {
-            return executeBatchWithWarmContainer(
-                    context,
-                    workspaceDirectory,
-                    dockerImage,
-                    dockerMemoryMb,
-                    "/usr/bin/bash run_all.sh",
-                    waitTimeoutMs
-            );
-        } catch (WarmContainerException | IOException exception) {
-            log.warn(
-                    "Warm container execution failed submissionId={} language={} dockerImage={} fallbackToDockerRun={}",
-                    context.submissionId(),
-                    context.language(),
-                    dockerImage,
-                    warmContainerManager.fallbackToDockerRun(),
-                    exception
-            );
-            if (!warmContainerManager.fallbackToDockerRun()) {
-                return new BatchExecutionResult(
-                        new CommandResult("", exception.getMessage(), null, true, null),
-                        EXECUTION_MODE_WARM_CONTAINER,
-                        false,
-                        true,
-                        null,
-                        null,
-                        null,
-                        null
-                );
-            }
-
-            Files.deleteIfExists(resultFile);
-            Files.deleteIfExists(metricsFile);
-            CommandResult fallbackResult = runInContainer(
-                    new JudgeContext(
-                            context.submissionId(),
-                            context.problemId(),
-                            context.language(),
-                            context.sourceCode(),
-                            "",
-                            context.timeLimitMs(),
-                            context.memoryLimitMb()
-                    ),
-                    workspaceDirectory,
-                    dockerImage,
-                    dockerMemoryMb,
-                    batchCommand,
-                    waitTimeoutMs,
-                    null
-            );
-            return new BatchExecutionResult(
-                    fallbackResult,
-                    EXECUTION_MODE_DOCKER_RUN,
-                    true,
-                    true,
-                    null,
-                    null,
-                    null,
-                    null
-            );
-        }
-    }
-
-    private BatchExecutionResult executeBatchWithWarmContainer(
-            JudgeRunContext context,
-            Path workspaceDirectory,
-            String dockerImage,
-            int dockerMemoryMb,
-            String batchCommand,
-            long waitTimeoutMs
-    ) throws IOException, InterruptedException {
-        WarmContainerPool.WarmContainerAcquireResult acquired = null;
-        WarmContainer container = null;
-        boolean containerRecreated = false;
-        try {
-            acquired = warmContainerManager.acquire(
-                    context.submissionId(),
-                    context.language(),
-                    dockerImage,
-                    dockerMemoryMb,
-                    CPU_LIMIT,
-                    PIDS_LIMIT
-            );
-            container = acquired.container();
-            cleanupWarmWorkspace(context.submissionId(), container, workspaceDirectory);
-            CommandResult execResult = execInWarmContainer(context, container, workspaceDirectory, batchCommand, waitTimeoutMs);
-            if (execResult.systemError() || execResult.exitCode() == null || execResult.exitCode() != 0) {
-                containerRecreated = true;
-                warmContainerManager.discardAndReplace(container, "exec-failure", CPU_LIMIT, PIDS_LIMIT);
-                throw new WarmContainerException("Warm container exec failed: " + execResult.stderr());
-            }
-            return new BatchExecutionResult(
-                    execResult,
-                    EXECUTION_MODE_WARM_CONTAINER,
-                    false,
-                    containerRecreated,
-                    container.containerId(),
-                    acquired.acquireWaitMs(),
-                    acquired.poolSize(),
-                    container
-            );
-        } catch (WarmContainerException exception) {
-            if (container != null && !containerRecreated) {
-                containerRecreated = true;
-                warmContainerManager.discardAndReplace(container, exception.getMessage(), CPU_LIMIT, PIDS_LIMIT);
-            }
-            throw exception;
-        }
-    }
-
-    private JudgeRunResult readAndCompareBatchResult(
-            JudgeRunContext context,
-            Path workspaceDirectory,
-            String dockerImage,
-            int dockerMemoryMb,
-            long batchStartedAt,
-            BatchExecutionResult executionResult,
-            String batchCommand,
-            long waitTimeoutMs,
-            Path resultFile,
-            Path metricsFile
-    ) throws IOException, InterruptedException {
-        try {
-            CommandResult dockerResult = executionResult.commandResult();
-            BatchScriptMetrics scriptMetrics = readBatchScriptMetrics(context.submissionId(), metricsFile);
-            JudgeRunResult finalRunResult;
-
-            if (dockerResult.systemError()) {
-                logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
-                finalRunResult = JudgeRunResult.systemError();
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-
-            if (dockerResult.exitCode() == null || dockerResult.exitCode() != 0) {
-                logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
-                finalRunResult = JudgeRunResult.systemError();
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-
-            if (!Files.exists(resultFile)) {
-                logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
-                if (shouldFallbackFromWarmExecution(executionResult)) {
-                    return fallbackAndReadBatchResult(context, workspaceDirectory, dockerImage, dockerMemoryMb, batchStartedAt, batchCommand, waitTimeoutMs, resultFile, metricsFile);
-                }
-                finalRunResult = JudgeRunResult.systemError();
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-
-            BatchResult batchResult;
-            try {
-                batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
-            } catch (Exception exception) {
-                logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
-                log.error("Failed to parse batch result.json for submission {}", context.submissionId(), exception);
-                if (shouldFallbackFromWarmExecution(executionResult)) {
-                    return fallbackAndReadBatchResult(context, workspaceDirectory, dockerImage, dockerMemoryMb, batchStartedAt, batchCommand, waitTimeoutMs, resultFile, metricsFile);
-                }
-                finalRunResult = JudgeRunResult.systemError();
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-            if (batchResult.result() == null) {
-                logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, dockerResult);
-                if (shouldFallbackFromWarmExecution(executionResult)) {
-                    return fallbackAndReadBatchResult(context, workspaceDirectory, dockerImage, dockerMemoryMb, batchStartedAt, batchCommand, waitTimeoutMs, resultFile, metricsFile);
-                }
-                finalRunResult = JudgeRunResult.systemError();
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-
-            JudgeRunResult outputComparisonResult = compareBatchOutputs(context, workspaceDirectory, batchResult);
-            if (outputComparisonResult != null) {
-                finalRunResult = outputComparisonResult;
-                logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-                return finalRunResult;
-            }
-
-            finalRunResult = new JudgeRunResult(
-                    batchResult.result(),
-                    batchResult.executionTimeMs(),
-                    batchResult.memoryUsageKb(),
-                    batchResult.failedTestcaseOrder()
-            );
-            logBatchMetrics(context, dockerImage, batchStartedAt, executionResult, scriptMetrics, finalRunResult);
-            return finalRunResult;
-        } finally {
-            finalizeWarmContainerExecution(context, workspaceDirectory, executionResult);
-        }
-    }
-
-    private boolean shouldFallbackFromWarmExecution(BatchExecutionResult executionResult) {
-        return EXECUTION_MODE_WARM_CONTAINER.equals(executionResult.executionMode())
-                && warmContainerManager != null
-                && warmContainerManager.fallbackToDockerRun();
-    }
-
-    private void finalizeWarmContainerExecution(
-            JudgeRunContext context,
-            Path workspaceDirectory,
-            BatchExecutionResult executionResult
-    ) {
-        WarmContainer container = executionResult.warmContainer();
-        if (!EXECUTION_MODE_WARM_CONTAINER.equals(executionResult.executionMode()) || container == null) {
-            return;
-        }
-
-        try {
-            cleanupWarmWorkspace(context.submissionId(), container, workspaceDirectory);
-            warmContainerManager.release(context.submissionId(), container, CPU_LIMIT, PIDS_LIMIT);
-        } catch (WarmContainerException exception) {
-            warmContainerManager.discardAndReplace(container, "post-cleanup-failure", CPU_LIMIT, PIDS_LIMIT);
-            log.warn(
-                    "Warm container post execution cleanup failed submissionId={} containerId={} workspaceDirectory={}",
-                    context.submissionId(),
-                    container.containerId(),
-                    workspaceDirectory,
-                    exception
-            );
-        }
-    }
-
-    private JudgeRunResult fallbackAndReadBatchResult(
-            JudgeRunContext context,
-            Path workspaceDirectory,
-            String dockerImage,
-            int dockerMemoryMb,
-            long batchStartedAt,
-            String batchCommand,
-            long waitTimeoutMs,
-            Path resultFile,
-            Path metricsFile
-    ) throws IOException, InterruptedException {
-        Files.deleteIfExists(resultFile);
-        Files.deleteIfExists(metricsFile);
-        CommandResult fallbackResult = runInContainer(
-                new JudgeContext(
-                        context.submissionId(),
-                        context.problemId(),
-                        context.language(),
-                        context.sourceCode(),
-                        "",
-                        context.timeLimitMs(),
-                        context.memoryLimitMb()
-                ),
-                workspaceDirectory,
-                dockerImage,
-                dockerMemoryMb,
-                batchCommand,
-                waitTimeoutMs,
-                null
-        );
-        BatchExecutionResult fallbackExecution = new BatchExecutionResult(
-                fallbackResult,
-                EXECUTION_MODE_DOCKER_RUN,
-                true,
-                true,
                 null,
-                null,
-                null,
-                null
+                progressFile
         );
-        return readAndCompareBatchResult(
-                context,
-                workspaceDirectory,
-                dockerImage,
-                dockerMemoryMb,
-                batchStartedAt,
-                fallbackExecution,
-                batchCommand,
-                waitTimeoutMs,
-                resultFile,
-                metricsFile
+
+        if (result.systemError()) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            return JudgeRunResult.systemError();
+        }
+
+        if (result.exitCode() == null || result.exitCode() != 0) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            return JudgeRunResult.systemError();
+        }
+
+        if (!Files.exists(resultFile)) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            return JudgeRunResult.systemError();
+        }
+
+        BatchResult batchResult;
+        try {
+            batchResult = objectMapper.readValue(resultFile.toFile(), BatchResult.class);
+        } catch (Exception exception) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            log.error("Failed to parse batch result.json for submission {}", context.submissionId(), exception);
+            return JudgeRunResult.systemError();
+        }
+        if (batchResult.result() == null) {
+            logBatchFailureDiagnostics(context.submissionId(), workspaceDirectory, result);
+            return JudgeRunResult.systemError();
+        }
+
+        JudgeRunResult outputComparisonResult = compareBatchOutputs(context, workspaceDirectory, batchResult);
+        if (outputComparisonResult != null) {
+            return outputComparisonResult;
+        }
+
+        return new JudgeRunResult(
+                batchResult.result(),
+                batchResult.executionTimeMs(),
+                batchResult.memoryUsageKb(),
+                batchResult.failedTestcaseOrder()
         );
     }
 
@@ -513,6 +234,28 @@ public class DockerProcessExecutor {
             String containerCommand,
             long waitTimeoutMs,
             String stdin
+    ) throws IOException, InterruptedException {
+        return runInContainer(
+                context,
+                workspaceDirectory,
+                dockerImage,
+                dockerMemoryMb,
+                containerCommand,
+                waitTimeoutMs,
+                stdin,
+                null
+        );
+    }
+
+    private CommandResult runInContainer(
+            JudgeContext context,
+            Path workspaceDirectory,
+            String dockerImage,
+            int dockerMemoryMb,
+            String containerCommand,
+            long waitTimeoutMs,
+            String stdin,
+            Path progressFile
     ) throws IOException, InterruptedException {
         Path cidFile = workspaceDirectory.resolve(".container.cid");
         List<String> command = List.of(
@@ -528,8 +271,6 @@ public class DockerProcessExecutor {
                 dockerMemoryMb + "m",
                 "--cpus",
                 CPU_LIMIT,
-                "--pids-limit",
-                PIDS_LIMIT,
                 "-v",
                 workspaceDirectory.toAbsolutePath() + ":/workspace",
                 "-w",
@@ -541,7 +282,7 @@ public class DockerProcessExecutor {
         );
 
         Process process = null;
-        long processStartedAt = 0L;
+        ProgressPoller progressPoller = null;
         try {
             log.info(
                     "Starting Docker execution for submission {} with image={} command={}",
@@ -549,8 +290,11 @@ public class DockerProcessExecutor {
                     dockerImage,
                     containerCommand
             );
-            processStartedAt = System.nanoTime();
             process = new ProcessBuilder(command).start();
+            if (progressFile != null) {
+                progressPoller = new ProgressPoller(context.submissionId(), progressFile);
+                progressPoller.start();
+            }
 
             try (OutputStream outputStream = process.getOutputStream()) {
                 if (stdin != null) {
@@ -559,34 +303,34 @@ public class DockerProcessExecutor {
             }
 
             boolean finished = process.waitFor(waitTimeoutMs, TimeUnit.MILLISECONDS);
+            if (progressPoller != null) {
+                progressPoller.drain();
+            }
 
             if (!finished) {
                 process.destroyForcibly();
-                long processElapsedMs = elapsedMillisOrNull(processStartedAt);
                 log.info(
                         "Docker client process timed out for submission {} after {} ms with image={}",
                         context.submissionId(),
                         waitTimeoutMs,
                         dockerImage
                 );
-                return new CommandResult("", "Docker client process timed out", null, true, processElapsedMs);
+                return new CommandResult("", "Docker client process timed out", null, true);
             }
 
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             int exitCode = process.exitValue();
-            long processElapsedMs = elapsedMillisOrNull(processStartedAt);
 
             log.info(
-                    "Docker execution finished for submission {} with image={} exitCode={} memoryLimit={}m cpuLimit={} dockerProcessElapsedMs={}",
+                    "Docker execution finished for submission {} with image={} exitCode={} memoryLimit={}m cpuLimit={}",
                     context.submissionId(),
                     dockerImage,
                     exitCode,
                     dockerMemoryMb,
-                    CPU_LIMIT,
-                    processElapsedMs
+                    CPU_LIMIT
             );
-            return new CommandResult(stdout, stderr, exitCode, false, processElapsedMs);
+            return new CommandResult(stdout, stderr, exitCode, false);
         } catch (IOException exception) {
             log.warn(
                     "Failed to start Docker for submission {} with image={} command={}",
@@ -597,6 +341,9 @@ public class DockerProcessExecutor {
             );
             throw exception;
         } finally {
+            if (progressPoller != null) {
+                progressPoller.stop();
+            }
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
                 log.info("Destroyed running Docker client process for submission {}", context.submissionId());
@@ -612,101 +359,6 @@ public class DockerProcessExecutor {
                 + "s "
                 + runCommand
                 + " < /workspace/input.txt > /workspace/output.txt 2> /workspace/error.txt";
-    }
-
-    private CommandResult execInWarmContainer(
-            JudgeRunContext context,
-            WarmContainer container,
-            Path workspaceDirectory,
-            String containerCommand,
-            long waitTimeoutMs
-    ) throws IOException, InterruptedException {
-        List<String> command = List.of(
-                "docker",
-                "exec",
-                "-w",
-                workspaceDirectory.toAbsolutePath().toString(),
-                container.containerId(),
-                "sh",
-                "-lc",
-                containerCommand
-        );
-
-        Process process = null;
-        long processStartedAt = 0L;
-        try {
-            processStartedAt = System.nanoTime();
-            process = new ProcessBuilder(command).start();
-            boolean finished = process.waitFor(waitTimeoutMs, TimeUnit.MILLISECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                long processElapsedMs = elapsedMillisOrNull(processStartedAt);
-                log.warn(
-                        "Warm container docker exec timed out submissionId={} language={} containerId={} waitTimeoutMs={} dockerExecElapsedMs={}",
-                        context.submissionId(),
-                        context.language(),
-                        container.containerId(),
-                        waitTimeoutMs,
-                        processElapsedMs
-                );
-                return new CommandResult("", "Warm container docker exec timed out", null, true, processElapsedMs);
-            }
-
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            int exitCode = process.exitValue();
-            long processElapsedMs = elapsedMillisOrNull(processStartedAt);
-            log.info(
-                    "Warm container docker exec finished submissionId={} language={} dockerImage={} containerId={} exitCode={} dockerExecElapsedMs={}",
-                    context.submissionId(),
-                    context.language(),
-                    container.dockerImage(),
-                    container.containerId(),
-                    exitCode,
-                    processElapsedMs
-            );
-            return new CommandResult(stdout, stderr, exitCode, false, processElapsedMs);
-        } finally {
-            if (process != null && process.isAlive()) {
-                process.destroyForcibly();
-            }
-        }
-    }
-
-    private void cleanupWarmWorkspace(Long submissionId, WarmContainer container, Path workspaceDirectory) {
-        List<String> command = List.of(
-                "docker",
-                "exec",
-                "-w",
-                workspaceDirectory.toAbsolutePath().toString(),
-                container.containerId(),
-                "sh",
-                "-lc",
-                "rm -f result.json batch_metrics.json compile_stdout.txt compile_stderr.txt output_*.txt error_*.txt usage_*.txt"
-        );
-        try {
-            Process process = new ProcessBuilder(command).start();
-            boolean finished = process.waitFor(warmContainerManager.cleanupTimeoutMs(), TimeUnit.MILLISECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                throw new WarmContainerException("cleanup-timeout");
-            }
-            if (process.exitValue() != 0) {
-                String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-                throw new WarmContainerException("cleanup-failure: " + stderr.trim());
-            }
-        } catch (IOException exception) {
-            throw new WarmContainerException("cleanup-io-failure", exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new WarmContainerException("cleanup-interrupted", exception);
-        }
-        log.info(
-                "Warm container workspace cleanup completed submissionId={} containerId={} workspaceDirectory={}",
-                submissionId,
-                container.containerId(),
-                workspaceDirectory
-        );
     }
 
     private void writeBatchTestCaseFiles(JudgeRunContext context, Path workspaceDirectory) throws IOException {
@@ -731,7 +383,7 @@ public class DockerProcessExecutor {
         }
     }
 
-    private String buildRunAllScript(
+    String buildRunAllScript(
             JudgeRunContext context,
             String compileCommand,
             Long compileTimeoutMs,
@@ -741,13 +393,8 @@ public class DockerProcessExecutor {
         String compileBlock = "";
         if (compileCommand != null && !compileCommand.isBlank()) {
             compileBlock = """
-                    # Measures javac/g++ elapsed time inside the already-started batch container.
-                    compile_started_at="$(now_ms)"
                     timeout "$COMPILE_TIMEOUT_SECONDS"s /usr/bin/bash -lc "$COMPILE_COMMAND" > compile_stdout.txt 2> compile_stderr.txt
                     compile_exit=$?
-                    compile_finished_at="$(now_ms)"
-                    compile_time_ms=$((compile_finished_at - compile_started_at))
-                    write_metrics
                     if [ "$compile_exit" -ne 0 ]; then
                       write_result CE "" "" "" ""
                       exit 0
@@ -768,8 +415,6 @@ public class DockerProcessExecutor {
                 RUN_COMMAND=%s
                 max_time=""
                 max_mem=""
-                compile_time_ms=""
-                test_execution_total_time_ms=0
 
                 json_number_or_null() {
                   if [ -z "$1" ]; then
@@ -793,6 +438,17 @@ public class DockerProcessExecutor {
                     "$(json_number_or_null "$failed_file_index")" > result.json
                 }
 
+                write_progress() {
+                  completed="$1"
+                  if [ "$TEST_COUNT" -le 0 ]; then
+                    percent=0
+                  else
+                    percent=$((completed * 100 / TEST_COUNT))
+                  fi
+                  printf '{"phase":"RUNNING","completedTestcases":%%s,"totalTestcases":%%s,"progressPercent":%%s}\\n' \\
+                    "$completed" "$TEST_COUNT" "$percent" >> progress.jsonl 2>/dev/null || true
+                }
+
                 update_max() {
                   time_value="$1"
                   mem_value="$2"
@@ -802,26 +458,6 @@ public class DockerProcessExecutor {
                   if [ -n "$mem_value" ] && { [ -z "$max_mem" ] || [ "$mem_value" -gt "$max_mem" ]; }; then
                     max_mem="$mem_value"
                   fi
-                }
-
-                # These metrics separate Docker/container overhead from compile and testcase runtime.
-                # compileTimeMs: compile command duration only.
-                # testExecutionTotalTimeMs: sum of testcase command wall time; compile time is excluded.
-                # maxSingleTestExecutionTimeMs: /usr/bin/time max testcase runtime, same meaning as executionTimeMs.
-                write_metrics() {
-                  printf '{"compileTimeMs":%%s,"testExecutionTotalTimeMs":%%s,"maxSingleTestExecutionTimeMs":%%s,"maxMemoryUsageKb":%%s}\\n' \\
-                    "$(json_number_or_null "$compile_time_ms")" \\
-                    "$(json_number_or_null "$test_execution_total_time_ms")" \\
-                    "$(json_number_or_null "$max_time")" \\
-                    "$(json_number_or_null "$max_mem")" > %s
-                }
-
-                now_ms() {
-                  value="$(date +%%s%%3N 2>/dev/null)"
-                  case "$value" in
-                    *[!0-9]*|"") printf '%%s000' "$(date +%%s)" ;;
-                    *) printf '%%s' "$value" ;;
-                  esac
                 }
 
                 elapsed_to_ms() {
@@ -859,19 +495,15 @@ public class DockerProcessExecutor {
                   error_file="error_$i.txt"
                   rm -f "$usage_file" "$output_file" "$error_file"
 
-                  # Measures testcase command wall time separately from compile time and Docker startup time.
-                  test_started_at="$(now_ms)"
                   /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s /usr/bin/bash -lc "$RUN_COMMAND" \\
                     < "input_$i.txt" > "$output_file" 2> "$error_file"
                   run_exit=$?
-                  test_finished_at="$(now_ms)"
-                  test_execution_total_time_ms=$((test_execution_total_time_ms + test_finished_at - test_started_at))
                   parse_usage "$usage_file"
                   if [ "$run_exit" -eq 124 ] && [ -z "$parsed_time" ]; then
                     parsed_time=%d
                   fi
                   update_max "$parsed_time" "$parsed_mem"
-                  write_metrics
+                  write_progress "$i"
 
                   if [ "$run_exit" -eq 124 ]; then
                     write_result TLE "$order" "$max_time" "$max_mem" "$i"
@@ -893,7 +525,6 @@ public class DockerProcessExecutor {
                   i=$((i + 1))
                 done
 
-                write_metrics
                 write_result AC "" "$max_time" "$max_mem" ""
                 exit 0
                 """.formatted(
@@ -903,7 +534,6 @@ public class DockerProcessExecutor {
                 toTimeoutSeconds(compileTimeoutMs == null ? 0 : compileTimeoutMs.intValue()),
                 shellSingleQuote(compileCommand == null ? "" : compileCommand),
                 shellSingleQuote(runCommand),
-                BATCH_METRICS_FILE_NAME,
                 compileBlock,
                 context.timeLimitMs() == null ? 0 : context.timeLimitMs()
         );
@@ -913,75 +543,6 @@ public class DockerProcessExecutor {
         long perCaseTimeoutMs = (context.timeLimitMs() == null ? 0L : context.timeLimitMs()) + COMMAND_TIMEOUT_BUFFER_MS;
         long compileMs = compileTimeoutMs == null ? 0L : compileTimeoutMs;
         return compileMs + (perCaseTimeoutMs * context.hiddenTestCases().size()) + COMMAND_TIMEOUT_BUFFER_MS;
-    }
-
-    private BatchScriptMetrics readBatchScriptMetrics(Long submissionId, Path metricsFile) {
-        if (!Files.exists(metricsFile)) {
-            log.warn("Batch metrics file is missing for submission {}: {}", submissionId, metricsFile);
-            return BatchScriptMetrics.empty();
-        }
-
-        try {
-            return objectMapper.readValue(metricsFile.toFile(), BatchScriptMetrics.class);
-        } catch (Exception exception) {
-            log.warn("Failed to parse batch metrics JSON for submission {}: {}", submissionId, metricsFile, exception);
-            return BatchScriptMetrics.empty();
-        }
-    }
-
-    private void logBatchMetrics(
-            JudgeRunContext context,
-            String dockerImage,
-            long batchStartedAt,
-            BatchExecutionResult executionResult,
-            BatchScriptMetrics scriptMetrics,
-            JudgeRunResult finalRunResult
-    ) {
-        CommandResult dockerResult = executionResult.commandResult();
-        try {
-            log.info(
-                    "Judge batch metrics submissionId={} problemId={} language={} executionMode={} dockerImage={} testCount={} result={} totalBatchElapsedMs={} dockerProcessElapsedMs={} compileTimeMs={} testExecutionTotalTimeMs={} maxSingleTestExecutionTimeMs={} maxMemoryUsageKb={} failedTestcaseOrder={} containerId={} poolSize={} acquireWaitMs={} containerRecreated={} fallbackUsed={}",
-                    context.submissionId(),
-                    context.problemId(),
-                    context.language(),
-                    executionResult.executionMode(),
-                    dockerImage,
-                    context.hiddenTestCases().size(),
-                    finalRunResult.finalResult(),
-                    elapsedMillis(batchStartedAt),
-                    dockerResult == null ? null : dockerResult.processElapsedMs(),
-                    scriptMetrics.compileTimeMs(),
-                    scriptMetrics.testExecutionTotalTimeMs(),
-                    firstNonNull(scriptMetrics.maxSingleTestExecutionTimeMs(), finalRunResult.executionTimeMs()),
-                    firstNonNull(scriptMetrics.maxMemoryUsageKb(), finalRunResult.memoryKb()),
-                    finalRunResult.failedTestcaseOrder(),
-                    executionResult.containerId(),
-                    executionResult.poolSize(),
-                    executionResult.acquireWaitMs(),
-                    executionResult.containerRecreated(),
-                    executionResult.fallbackUsed()
-            );
-        } catch (Exception exception) {
-            log.warn("Failed to write judge batch metrics for submission {}", context.submissionId(), exception);
-        }
-    }
-
-    private Long firstNonNull(Long first, Integer second) {
-        if (first != null) {
-            return first;
-        }
-        return second == null ? null : second.longValue();
-    }
-
-    private long elapsedMillis(long startedAtNanos) {
-        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
-    }
-
-    private long elapsedMillisOrNull(long startedAtNanos) {
-        if (startedAtNanos == 0L) {
-            return 0L;
-        }
-        return elapsedMillis(startedAtNanos);
     }
 
     private String shellSingleQuote(String value) {
@@ -1325,12 +886,106 @@ public class DockerProcessExecutor {
         }
     }
 
+    JudgeProgressEvent parseProgressLine(Long submissionId, String line) throws IOException {
+        ProgressLine progressLine = objectMapper.readValue(line, ProgressLine.class);
+        return JudgeProgressEvent.running(
+                submissionId,
+                progressLine.completedTestcases(),
+                progressLine.totalTestcases(),
+                progressLine.progressPercent()
+        );
+    }
+
+    void publishProgress(Long submissionId, String line) {
+        try {
+            JudgeProgressEvent event = parseProgressLine(submissionId, line);
+            judgeProgressPublisher.publish(event);
+            log.debug(
+                    "Progress published submissionId={} completedTestcases={} totalTestcases={}",
+                    submissionId,
+                    event.completedTestcases(),
+                    event.totalTestcases()
+            );
+        } catch (Exception exception) {
+            log.warn("Progress publish failed submissionId={}", submissionId, exception);
+        }
+    }
+
+    private class ProgressPoller {
+
+        private static final long POLL_INTERVAL_MS = 200L;
+
+        private final Long submissionId;
+        private final Path progressFile;
+        private final ScheduledExecutorService executorService;
+        private long offset;
+        private ScheduledFuture<?> future;
+
+        private ProgressPoller(Long submissionId, Path progressFile) {
+            this.submissionId = submissionId;
+            this.progressFile = progressFile;
+            this.executorService = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "judge-progress-poller-" + submissionId);
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+
+        private void start() {
+            log.info("Progress polling started submissionId={}", submissionId);
+            future = executorService.scheduleWithFixedDelay(this::drainSafely, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        }
+
+        private void drainSafely() {
+            try {
+                drain();
+            } catch (Exception exception) {
+                log.warn("Progress polling failed submissionId={}", submissionId, exception);
+            }
+        }
+
+        private void drain() throws IOException {
+            if (!Files.exists(progressFile)) {
+                return;
+            }
+
+            try (RandomAccessFile file = new RandomAccessFile(progressFile.toFile(), "r")) {
+                if (offset > file.length()) {
+                    offset = 0;
+                }
+                file.seek(offset);
+
+                String line;
+                while ((line = file.readLine()) != null) {
+                    if (!line.isBlank()) {
+                        publishProgress(submissionId, line);
+                    }
+                }
+                offset = file.getFilePointer();
+            }
+        }
+
+        private void stop() {
+            if (future != null) {
+                future.cancel(false);
+            }
+            executorService.shutdownNow();
+            try {
+                if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                    log.warn("Progress polling did not stop cleanly submissionId={}", submissionId);
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            log.info("Progress polling stopped submissionId={}", submissionId);
+        }
+    }
+
     private record CommandResult(
             String stdout,
             String stderr,
             Integer exitCode,
-            boolean systemError,
-            Long processElapsedMs
+            boolean systemError
     ) {
     }
 
@@ -1349,26 +1004,11 @@ public class DockerProcessExecutor {
     ) {
     }
 
-    private record BatchExecutionResult(
-            CommandResult commandResult,
-            String executionMode,
-            boolean fallbackUsed,
-            boolean containerRecreated,
-            String containerId,
-            Long acquireWaitMs,
-            Integer poolSize,
-            WarmContainer warmContainer
+    private record ProgressLine(
+            String phase,
+            Integer completedTestcases,
+            Integer totalTestcases,
+            Integer progressPercent
     ) {
-    }
-
-    private record BatchScriptMetrics(
-            Long compileTimeMs,
-            Long testExecutionTotalTimeMs,
-            Long maxSingleTestExecutionTimeMs,
-            Long maxMemoryUsageKb
-    ) {
-        private static BatchScriptMetrics empty() {
-            return new BatchScriptMetrics(null, null, null, null);
-        }
     }
 }

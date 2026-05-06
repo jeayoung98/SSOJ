@@ -3,7 +3,9 @@ package com.example.ssoj.judge;
 import com.example.ssoj.judge.application.port.ExecutionGateway;
 import com.example.ssoj.judge.application.sevice.JudgePersistenceService;
 import com.example.ssoj.judge.application.sevice.JudgeService;
+import com.example.ssoj.judge.application.sevice.SubmissionProgressHub;
 import com.example.ssoj.judge.domain.model.HiddenTestCaseSnapshot;
+import com.example.ssoj.judge.domain.model.JudgeProgressEvent;
 import com.example.ssoj.judge.domain.model.JudgeRunContext;
 import com.example.ssoj.judge.domain.model.JudgeRunResult;
 import com.example.ssoj.judge.domain.model.StartedJudging;
@@ -23,6 +25,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +36,9 @@ class JudgeServiceTest {
 
     @Mock
     private ExecutionGateway executionGateway;
+
+    @Mock
+    private SubmissionProgressHub submissionProgressHub;
 
     @Test
     void judge_callsExecuteSubmissionOnceAndPersistsReturnedRunResult() {
@@ -120,6 +126,47 @@ class JudgeServiceTest {
         verify(judgePersistenceService).saveResultsAndFinish(eq(12L), resultCaptor.capture(), any(Instant.class));
         assertThat(resultCaptor.getValue().finalResult()).isEqualTo(SubmissionResult.SYSTEM_ERROR);
         assertThat(resultCaptor.getValue().failedTestcaseOrder()).isNull();
+    }
+
+    @Test
+    void judge_emitsDoneProgressAfterPersistingResult() {
+        StartedJudging startedJudging = startedJudging(List.of(
+                new HiddenTestCaseSnapshot(1L, 1, "", ""),
+                new HiddenTestCaseSnapshot(2L, 2, "", "")
+        ));
+        JudgeRunResult runnerResult = new JudgeRunResult(SubmissionResult.AC, 8, 256, null);
+        JudgeService judgeService = new JudgeService(judgePersistenceService, executionGateway, submissionProgressHub);
+
+        when(judgePersistenceService.startJudging(10L)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.executeSubmission(any(JudgeRunContext.class))).thenReturn(runnerResult);
+
+        judgeService.judge(10L);
+
+        ArgumentCaptor<JudgeProgressEvent> eventCaptor = ArgumentCaptor.forClass(JudgeProgressEvent.class);
+        verify(judgePersistenceService).saveResultsAndFinish(eq(10L), eq(runnerResult), any(Instant.class));
+        verify(submissionProgressHub).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().phase()).isEqualTo("DONE");
+        assertThat(eventCaptor.getValue().completedTestcases()).isEqualTo(2);
+        assertThat(eventCaptor.getValue().progressPercent()).isEqualTo(100);
+        assertThat(eventCaptor.getValue().result()).isEqualTo("AC");
+        verify(submissionProgressHub).complete(10L);
+    }
+
+    @Test
+    void judge_doneProgressFailureDoesNotPreventPersistingResult() {
+        StartedJudging startedJudging = startedJudging(List.of(new HiddenTestCaseSnapshot(1L, 1, "", "")));
+        JudgeRunResult runnerResult = new JudgeRunResult(SubmissionResult.AC, 8, 256, null);
+        JudgeService judgeService = new JudgeService(judgePersistenceService, executionGateway, submissionProgressHub);
+
+        when(judgePersistenceService.startJudging(10L)).thenReturn(startedJudging);
+        when(executionGateway.supports("python")).thenReturn(true);
+        when(executionGateway.executeSubmission(any(JudgeRunContext.class))).thenReturn(runnerResult);
+        doThrow(new IllegalStateException("sse failed")).when(submissionProgressHub).publish(any());
+
+        judgeService.judge(10L);
+
+        verify(judgePersistenceService).saveResultsAndFinish(eq(10L), eq(runnerResult), any(Instant.class));
     }
 
     private StartedJudging startedJudging(List<HiddenTestCaseSnapshot> hiddenTestCases) {
