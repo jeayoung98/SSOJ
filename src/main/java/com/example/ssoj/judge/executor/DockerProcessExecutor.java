@@ -486,6 +486,40 @@ public class DockerProcessExecutor {
                   parsed_mem="$(grep 'Maximum resident set size' "$usage_file" | sed 's/^.*:[[:space:]]*//')"
                 }
 
+                normalize_file_for_compare() {
+                  input_file="$1"
+                  normalized_file="$2"
+                  awk '
+                  {
+                    if (NR > 1) {
+                      text = text "\\n"
+                    }
+                    text = text $0
+                  }
+                  END {
+                    gsub(/\\r\\n/, "\\n", text)
+                    gsub(/\\r/, "\\n", text)
+                    line_count = split(text, lines, "\\n")
+                    end = line_count
+                    while (end > 0) {
+                      line = lines[end]
+                      sub(/[[:space:]]+$/, "", line)
+                      if (line != "") {
+                        break
+                      }
+                      end--
+                    }
+                    for (idx = 1; idx <= end; idx++) {
+                      line = lines[idx]
+                      sub(/[[:space:]]+$/, "", line)
+                      if (idx > 1) {
+                        printf "\\n"
+                      }
+                      printf "%%s", line
+                    }
+                  }' "$input_file" > "$normalized_file"
+                }
+
                 %s
                 i=1
                 while [ "$i" -le "$TEST_COUNT" ]; do
@@ -493,7 +527,9 @@ public class DockerProcessExecutor {
                   usage_file="usage_$i.txt"
                   output_file="output_$i.txt"
                   error_file="error_$i.txt"
-                  rm -f "$usage_file" "$output_file" "$error_file"
+                  expected_normalized_file="expected_${i}.normalized.txt"
+                  output_normalized_file="output_${i}.normalized.txt"
+                  rm -f "$usage_file" "$output_file" "$error_file" "$expected_normalized_file" "$output_normalized_file"
 
                   /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s /usr/bin/bash -lc "$RUN_COMMAND" \\
                     < "input_$i.txt" > "$output_file" 2> "$error_file"
@@ -519,6 +555,12 @@ public class DockerProcessExecutor {
                   fi
                   if [ "$run_exit" -ne 0 ]; then
                     write_result RE "$order" "$max_time" "$max_mem" "$i"
+                    exit 0
+                  fi
+                  normalize_file_for_compare "expected_$i.txt" "$expected_normalized_file"
+                  normalize_file_for_compare "$output_file" "$output_normalized_file"
+                  if ! cmp -s "$expected_normalized_file" "$output_normalized_file"; then
+                    write_result WA "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
 

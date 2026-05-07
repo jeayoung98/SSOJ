@@ -201,10 +201,105 @@ class DockerProcessExecutorTest {
             assertThat(result.executionTimeMs()).isNotNull();
             assertThat(result.memoryKb()).isNotNull();
             assertThat(Files.exists(workspaceDirectory.resolve("output_3.txt"))).isFalse();
+            assertThat(Files.readString(workspaceDirectory.resolve("progress.jsonl"), StandardCharsets.UTF_8))
+                    .contains("\"completedTestcases\":1")
+                    .contains("\"completedTestcases\":2")
+                    .doesNotContain("\"completedTestcases\":3");
+            assertThat(Files.readString(workspaceDirectory.resolve("result.json"), StandardCharsets.UTF_8))
+                    .contains("\"result\":\"WA\"")
+                    .contains("\"failedTestcaseOrder\":7")
+                    .contains("\"failedFileIndex\":2");
             assertThat(output).contains("fileIndex=2");
             assertThat(output).contains("testcaseOrder=7");
             assertThat(output).contains("actual");
             assertThat(output).contains("expected");
+        } finally {
+            deleteDirectory(workspaceDirectory);
+        }
+    }
+
+    @Test
+    void executeBatch_stopsAtFirstWrongAnswerAndRecordsProgress() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-batch-python-first-wa-test-");
+
+        try {
+            Files.writeString(
+                    workspaceDirectory.resolve("main.py"),
+                    "print('wrong')",
+                    StandardCharsets.UTF_8
+            );
+
+            JudgeRunResult result = dockerProcessExecutor.executeBatch(
+                    new JudgeRunContext(
+                            106L,
+                            206L,
+                            "python",
+                            "",
+                            List.of(
+                                    new HiddenTestCaseSnapshot(1L, 11, "", "expected\n"),
+                                    new HiddenTestCaseSnapshot(2L, 12, "", "skip\n")
+                            ),
+                            3000,
+                            128
+                    ),
+                    workspaceDirectory,
+                    "ssoj-python-runner:3.11",
+                    128,
+                    null,
+                    null,
+                    "python3 main.py"
+            );
+
+            assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
+            assertThat(result.failedTestcaseOrder()).isEqualTo(11);
+            assertThat(Files.exists(workspaceDirectory.resolve("output_2.txt"))).isFalse();
+            assertThat(Files.readString(workspaceDirectory.resolve("progress.jsonl"), StandardCharsets.UTF_8))
+                    .contains("\"completedTestcases\":1")
+                    .doesNotContain("\"completedTestcases\":2");
+            assertThat(Files.readString(workspaceDirectory.resolve("result.json"), StandardCharsets.UTF_8))
+                    .contains("\"result\":\"WA\"")
+                    .contains("\"failedTestcaseOrder\":11")
+                    .contains("\"failedFileIndex\":1");
+        } finally {
+            deleteDirectory(workspaceDirectory);
+        }
+    }
+
+    @Test
+    void executeBatch_acceptsTrailingWhitespaceAndFinalNewlineDifferences() throws Exception {
+        DockerProcessExecutor dockerProcessExecutor = new DockerProcessExecutor();
+        Path workspaceDirectory = Files.createTempDirectory("docker-batch-python-normalized-ac-test-");
+
+        try {
+            Files.writeString(
+                    workspaceDirectory.resolve("main.py"),
+                    "print('15')",
+                    StandardCharsets.UTF_8
+            );
+
+            JudgeRunResult result = dockerProcessExecutor.executeBatch(
+                    new JudgeRunContext(
+                            107L,
+                            207L,
+                            "python",
+                            "",
+                            List.of(new HiddenTestCaseSnapshot(1L, 21, "", "15   \r\n\r\n")),
+                            3000,
+                            128
+                    ),
+                    workspaceDirectory,
+                    "ssoj-python-runner:3.11",
+                    128,
+                    null,
+                    null,
+                    "python3 main.py"
+            );
+
+            assertThat(result.finalResult()).isEqualTo(SubmissionResult.AC);
+            assertThat(result.failedTestcaseOrder()).isNull();
+            assertThat(Files.readString(workspaceDirectory.resolve("result.json"), StandardCharsets.UTF_8))
+                    .contains("\"result\":\"AC\"");
         } finally {
             deleteDirectory(workspaceDirectory);
         }
