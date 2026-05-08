@@ -59,6 +59,25 @@ class DockerProcessExecutorRunAllScriptTest {
         assertThat(wrongAnswerIndex).isLessThan(incrementIndex);
     }
 
+    @Test
+    void buildRunAllScript_measuresElapsedTimeInBashAndStoresPerTestcaseTime() {
+        String script = dockerProcessExecutor.buildRunAllScript(
+                context(),
+                null,
+                null,
+                "python3 main.py"
+        );
+
+        assertThat(script).contains("now_ms()");
+        assertThat(script).contains("fallback=\"$(date +%s%3N 2>/dev/null)\"");
+        assertThat(script).contains("started_at_ms=\"$(now_ms)\"");
+        assertThat(script).contains("finished_at_ms=\"$(now_ms)\"");
+        assertThat(script).contains("measured_time_ms=$((finished_at_ms - started_at_ms))");
+        assertThat(script).contains("parsed_time=\"$measured_time_ms\"");
+        assertThat(script).contains("time_file=\"time_$i.txt\"");
+        assertThat(script).contains("printf '%s\\n' \"$parsed_time\" > \"$time_file\"");
+    }
+
     private JudgeRunContext context() {
         return new JudgeRunContext(
                 57L,

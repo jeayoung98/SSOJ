@@ -93,6 +93,21 @@ class DockerProcessExecutorBatchOutputComparisonTest {
     }
 
     @Test
+    void compareBatchOutputs_keepsBatchExecutionTimeWhenUsageElapsedDiffers() throws Exception {
+        Path workspace = workspace("java", "1 2", "12");
+
+        JudgeRunResult result = dockerProcessExecutor.compareCompletedBatchOutputs(
+                context("java"),
+                workspace,
+                new JudgeRunResult(SubmissionResult.AC, 17, 100, null)
+        );
+
+        assertThat(result.finalResult()).isEqualTo(SubmissionResult.WA);
+        assertThat(result.executionTimeMs()).isEqualTo(17);
+        deleteDirectory(workspace);
+    }
+
+    @Test
     void compareBatchOutputs_logsFirstHiddenCaseFileIndexAndTestcaseOrder(CapturedOutput output) throws Exception {
         Path workspace = workspace("python", "1 2", "12");
 

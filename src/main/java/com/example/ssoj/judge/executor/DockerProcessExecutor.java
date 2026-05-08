@@ -460,6 +460,27 @@ public class DockerProcessExecutor {
                   fi
                 }
 
+                now_ms() {
+                  if [ -n "${EPOCHREALTIME:-}" ]; then
+                    epoch_seconds="${EPOCHREALTIME%%.*}"
+                    epoch_fraction="${EPOCHREALTIME#*.}"
+                    if [ "$epoch_seconds" != "$EPOCHREALTIME" ] && [ -n "$epoch_seconds" ]; then
+                      epoch_millis="${epoch_fraction}000"
+                      epoch_millis="${epoch_millis:0:3}"
+                      case "$epoch_seconds$epoch_millis" in
+                        ''|*[!0-9]*) ;;
+                        *) echo $((epoch_seconds * 1000 + epoch_millis)); return ;;
+                      esac
+                    fi
+                  fi
+
+                  fallback="$(date +%%s%%3N 2>/dev/null)"
+                  case "$fallback" in
+                    ''|*[!0-9]*) echo 0 ;;
+                    *) echo "$fallback" ;;
+                  esac
+                }
+
                 elapsed_to_ms() {
                   awk -v value="$1" 'BEGIN {
                     n = split(value, parts, ":")
@@ -525,19 +546,39 @@ public class DockerProcessExecutor {
                 while [ "$i" -le "$TEST_COUNT" ]; do
                   order="$(cat "order_$i.txt")"
                   usage_file="usage_$i.txt"
+                  time_file="time_$i.txt"
                   output_file="output_$i.txt"
                   error_file="error_$i.txt"
                   expected_normalized_file="expected_${i}.normalized.txt"
                   output_normalized_file="output_${i}.normalized.txt"
-                  rm -f "$usage_file" "$output_file" "$error_file" "$expected_normalized_file" "$output_normalized_file"
+                  rm -f "$usage_file" "$time_file" "$output_file" "$error_file" "$expected_normalized_file" "$output_normalized_file"
 
+                  started_at_ms="$(now_ms)"
                   /usr/bin/time -v -o "$usage_file" timeout "$TIME_LIMIT_SECONDS"s /usr/bin/bash -lc "$RUN_COMMAND" \\
                     < "input_$i.txt" > "$output_file" 2> "$error_file"
                   run_exit=$?
+                  finished_at_ms="$(now_ms)"
+                  measured_time_ms=""
+                  if [ -n "$started_at_ms" ] && [ -n "$finished_at_ms" ]; then
+                    case "$started_at_ms$finished_at_ms" in
+                      *[!0-9]*) ;;
+                      *)
+                        if [ "$finished_at_ms" -ge "$started_at_ms" ]; then
+                          measured_time_ms=$((finished_at_ms - started_at_ms))
+                        fi
+                        ;;
+                    esac
+                  fi
                   parse_usage "$usage_file"
+                  if [ -n "$measured_time_ms" ]; then
+                    parsed_time="$measured_time_ms"
+                  else
+                    parsed_time=""
+                  fi
                   if [ "$run_exit" -eq 124 ] && [ -z "$parsed_time" ]; then
                     parsed_time=%d
                   fi
+                  printf '%%s\\n' "$parsed_time" > "$time_file"
                   update_max "$parsed_time" "$parsed_mem"
                   write_progress "$i"
 
@@ -626,8 +667,8 @@ public class DockerProcessExecutor {
             return null;
         }
 
-        Integer maxExecutionTimeMs = null;
-        Integer maxMemoryKb = null;
+        Integer maxExecutionTimeMs = batchResult.executionTimeMs();
+        Integer maxMemoryKb = batchResult.memoryUsageKb();
         for (int index = 0; index < context.hiddenTestCases().size(); index++) {
             int fileIndex = index + 1;
             HiddenTestCaseSnapshot testCase = context.hiddenTestCases().get(index);
@@ -638,7 +679,6 @@ public class DockerProcessExecutor {
                     context.timeLimitMs()
             );
             if (usageMetrics != null) {
-                maxExecutionTimeMs = max(maxExecutionTimeMs, usageMetrics.executionTimeMs());
                 maxMemoryKb = max(maxMemoryKb, usageMetrics.memoryUsageKb());
             }
 
