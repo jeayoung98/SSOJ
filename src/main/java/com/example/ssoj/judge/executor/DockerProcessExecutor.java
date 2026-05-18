@@ -415,7 +415,6 @@ public class DockerProcessExecutor {
                 RUN_COMMAND=%s
                 max_time=""
                 max_mem=""
-                last_progress_written_at_ms=0
 
                 json_number_or_null() {
                   if [ -z "$1" ]; then
@@ -442,19 +441,9 @@ public class DockerProcessExecutor {
                 write_progress() {
                   completed="$1"
                   mode="$2"
-                  now="$(now_ms)"
                   should_write=false
-                  if [ "$mode" = "force" ] || [ "$last_progress_written_at_ms" -eq 0 ] || [ "$completed" -eq "$TEST_COUNT" ]; then
+                  if [ "$mode" = "force" ] || [ "$completed" -eq 1 ] || [ "$((completed %% 5))" -eq 0 ] || [ "$completed" -eq "$TEST_COUNT" ]; then
                     should_write=true
-                  else
-                    case "$now$last_progress_written_at_ms" in
-                      *[!0-9]*) ;;
-                      *)
-                        if [ $((now - last_progress_written_at_ms)) -ge 500 ]; then
-                          should_write=true
-                        fi
-                        ;;
-                    esac
                   fi
                   if [ "$should_write" != "true" ]; then
                     return
@@ -466,7 +455,6 @@ public class DockerProcessExecutor {
                   fi
                   printf '{"phase":"RUNNING","completedTestcases":%%s,"totalTestcases":%%s,"progressPercent":%%s}\\n' \\
                     "$completed" "$TEST_COUNT" "$percent" >> progress.jsonl 2>/dev/null || true
-                  last_progress_written_at_ms="$now"
                 }
 
                 update_max() {
