@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DockerProcessExecutorProgressTest {
 
     @Test
-    void buildRunAllScript_writesProgressAfterEachExecutedTestcase() {
+    void buildRunAllScript_throttlesNormalProgressAndSupportsForceProgress() {
         DockerProcessExecutor executor = new DockerProcessExecutor();
 
         String script = executor.buildRunAllScript(
@@ -34,9 +34,16 @@ class DockerProcessExecutorProgressTest {
                 "python3 main.py"
         );
 
-        assertThat(script).contains("write_progress()");
+        assertThat(script).contains("last_progress_written_at_ms=0");
+        assertThat(script).contains("write_progress() {");
+        assertThat(script).contains("mode=\"$2\"");
+        assertThat(script).contains("[ \"$mode\" = \"force\" ]");
+        assertThat(script).contains("[ $((now - last_progress_written_at_ms)) -ge 500 ]");
+        assertThat(script).contains("[ \"$completed\" -eq \"$TEST_COUNT\" ]");
         assertThat(script).contains(">> progress.jsonl 2>/dev/null || true");
-        assertThat(script).contains("write_progress \"$i\"");
+        assertThat(script).contains("last_progress_written_at_ms=\"$now\"");
+        assertThat(script).contains("write_progress \"$i\" \"normal\"");
+        assertThat(script).contains("write_progress \"$i\" \"force\"");
     }
 
     @Test

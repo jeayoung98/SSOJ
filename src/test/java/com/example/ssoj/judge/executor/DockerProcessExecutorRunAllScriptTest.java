@@ -41,22 +41,56 @@ class DockerProcessExecutorRunAllScriptTest {
                 "python3 main.py"
         );
 
-        int progressIndex = script.indexOf("write_progress \"$i\"");
+        int normalProgressIndex = script.indexOf("write_progress \"$i\" \"normal\"");
         int timeoutIndex = script.indexOf("write_result TLE \"$order\" \"$max_time\" \"$max_mem\" \"$i\"");
         int memoryByExitIndex = script.indexOf("if [ \"$run_exit\" -eq 137 ]; then");
         int memoryByUsageIndex = script.indexOf("if [ -n \"$parsed_mem\" ] && [ \"$parsed_mem\" -gt \"$MEMORY_LIMIT_KB\" ]; then");
         int runtimeErrorIndex = script.indexOf("if [ \"$run_exit\" -ne 0 ]; then");
         int compareIndex = script.indexOf("normalize_file_for_compare \"expected_$i.txt\" \"$expected_normalized_file\"");
+        int forcedWrongAnswerProgressIndex = script.lastIndexOf("write_progress \"$i\" \"force\"");
         int wrongAnswerIndex = script.indexOf("write_result WA \"$order\" \"$max_time\" \"$max_mem\" \"$i\"");
         int incrementIndex = script.indexOf("i=$((i + 1))");
 
-        assertThat(progressIndex).isLessThan(timeoutIndex);
         assertThat(timeoutIndex).isLessThan(memoryByExitIndex);
         assertThat(memoryByExitIndex).isLessThan(memoryByUsageIndex);
         assertThat(memoryByUsageIndex).isLessThan(runtimeErrorIndex);
         assertThat(runtimeErrorIndex).isLessThan(compareIndex);
         assertThat(compareIndex).isLessThan(wrongAnswerIndex);
-        assertThat(wrongAnswerIndex).isLessThan(incrementIndex);
+        assertThat(compareIndex).isLessThan(forcedWrongAnswerProgressIndex);
+        assertThat(forcedWrongAnswerProgressIndex).isLessThan(wrongAnswerIndex);
+        assertThat(wrongAnswerIndex).isLessThan(normalProgressIndex);
+        assertThat(normalProgressIndex).isLessThan(incrementIndex);
+    }
+
+    @Test
+    void buildRunAllScript_forceWritesProgressBeforeTerminalResults() {
+        String script = dockerProcessExecutor.buildRunAllScript(
+                context(),
+                null,
+                null,
+                "python3 main.py"
+        );
+
+        assertThat(script).contains("""
+                  if [ "$run_exit" -eq 124 ]; then
+                    write_progress "$i" "force"
+                    write_result TLE "$order" "$max_time" "$max_mem" "$i"
+                """);
+        assertThat(script).contains("""
+                  if [ "$run_exit" -eq 137 ]; then
+                    write_progress "$i" "force"
+                    write_result MLE "$order" "$max_time" "$max_mem" "$i"
+                """);
+        assertThat(script).contains("""
+                  if [ "$run_exit" -ne 0 ]; then
+                    write_progress "$i" "force"
+                    write_result RE "$order" "$max_time" "$max_mem" "$i"
+                """);
+        assertThat(script).contains("""
+                  if ! cmp -s "$expected_normalized_file" "$output_normalized_file"; then
+                    write_progress "$i" "force"
+                    write_result WA "$order" "$max_time" "$max_mem" "$i"
+                """);
     }
 
     @Test

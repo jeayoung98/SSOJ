@@ -415,6 +415,7 @@ public class DockerProcessExecutor {
                 RUN_COMMAND=%s
                 max_time=""
                 max_mem=""
+                last_progress_written_at_ms=0
 
                 json_number_or_null() {
                   if [ -z "$1" ]; then
@@ -440,6 +441,24 @@ public class DockerProcessExecutor {
 
                 write_progress() {
                   completed="$1"
+                  mode="$2"
+                  now="$(now_ms)"
+                  should_write=false
+                  if [ "$mode" = "force" ] || [ "$last_progress_written_at_ms" -eq 0 ] || [ "$completed" -eq "$TEST_COUNT" ]; then
+                    should_write=true
+                  else
+                    case "$now$last_progress_written_at_ms" in
+                      *[!0-9]*) ;;
+                      *)
+                        if [ $((now - last_progress_written_at_ms)) -ge 500 ]; then
+                          should_write=true
+                        fi
+                        ;;
+                    esac
+                  fi
+                  if [ "$should_write" != "true" ]; then
+                    return
+                  fi
                   if [ "$TEST_COUNT" -le 0 ]; then
                     percent=0
                   else
@@ -447,6 +466,7 @@ public class DockerProcessExecutor {
                   fi
                   printf '{"phase":"RUNNING","completedTestcases":%%s,"totalTestcases":%%s,"progressPercent":%%s}\\n' \\
                     "$completed" "$TEST_COUNT" "$percent" >> progress.jsonl 2>/dev/null || true
+                  last_progress_written_at_ms="$now"
                 }
 
                 update_max() {
@@ -580,34 +600,42 @@ public class DockerProcessExecutor {
                   fi
                   printf '%%s\\n' "$parsed_time" > "$time_file"
                   update_max "$parsed_time" "$parsed_mem"
-                  write_progress "$i"
 
                   if [ "$run_exit" -eq 124 ]; then
+                    write_progress "$i" "force"
                     write_result TLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ "$run_exit" -eq 137 ]; then
+                    write_progress "$i" "force"
                     write_result MLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ -n "$parsed_mem" ] && [ "$parsed_mem" -gt "$MEMORY_LIMIT_KB" ]; then
+                    write_progress "$i" "force"
                     write_result MLE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   if [ "$run_exit" -ne 0 ]; then
+                    write_progress "$i" "force"
                     write_result RE "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
                   normalize_file_for_compare "expected_$i.txt" "$expected_normalized_file"
                   normalize_file_for_compare "$output_file" "$output_normalized_file"
                   if ! cmp -s "$expected_normalized_file" "$output_normalized_file"; then
+                    write_progress "$i" "force"
                     write_result WA "$order" "$max_time" "$max_mem" "$i"
                     exit 0
                   fi
+                  write_progress "$i" "normal"
 
                   i=$((i + 1))
                 done
 
+                if [ "$TEST_COUNT" -le 0 ]; then
+                  write_progress 0 "force"
+                fi
                 write_result AC "" "$max_time" "$max_mem" ""
                 exit 0
                 """.formatted(
